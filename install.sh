@@ -15,6 +15,12 @@ else
   git clone --depth=1 "$PLUGIN_REPO" "$PLUGIN_DIR"
 fi
 
+# Ensure main plugin file is named talk2term.plugin.zsh
+if [ -f "$PLUGIN_DIR/talk2term.zsh" ] && [ ! -f "$PLUGIN_DIR/talk2term.plugin.zsh" ]; then
+  echo "Renaming talk2term.zsh to talk2term.plugin.zsh..."
+  mv "$PLUGIN_DIR/talk2term.zsh" "$PLUGIN_DIR/talk2term.plugin.zsh"
+fi
+
 # Add plugin to .zshrc if not present
 if grep -q "plugins=.*$PLUGIN_NAME" "$ZSHRC"; then
   echo "$PLUGIN_NAME already present in plugins list."
