@@ -16,6 +16,7 @@ _t2t_help() {
 Talk2Term ZSH Plugin Usage:
   t2t <your prompt>     # Free (Lite)
   t2t-p <your prompt>   # Paid (Pro)
+  t2t-credit           # Check credits
 
 Examples:
   t2t list all files modified today
