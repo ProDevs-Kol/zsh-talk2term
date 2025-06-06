@@ -5,7 +5,7 @@
 `zsh-talk2term` is a ZSH plugin for [Talk2Term](https://talk2term.prodevs.in), allowing you to type natural language prompts like:
 
 ```bash
-t2t: find all png files with “logo” in the current directory
+t2t: find all png files with "logo" in the current directory
 ```
 
 Or unlock deeper capabilities using:
@@ -20,19 +20,31 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 ## 🚀 Installation
 
-### 1. Clone the plugin
+### 🟢 Easy One-Liner (Recommended)
+
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/main/install.sh)"
+```
+
+Paste this in your terminal to install the plugin instantly!
+
+---
+
+### ⚙️ Manual Installation
+
+1. **Clone the plugin**
 
 ```bash
 git clone https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
-### 2. Add to your `.zshrc`
+2. **Add to your `.zshrc`**
 
 ```bash
 plugins=(... talk2term)
 ```
 
-Then reload your shell:
+3. **Reload your shell**
 
 ```bash
 source ~/.zshrc
