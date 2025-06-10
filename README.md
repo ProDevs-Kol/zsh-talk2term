@@ -30,6 +30,24 @@ Paste this in your terminal to install the plugin instantly!
 
 ---
 
+## 🔑 API Key Setup
+
+To use this plugin, you need an API key from [Talk2Term](https://talk2term.prodevs.in/):
+
+1. Sign up or log in at [https://talk2term.prodevs.in/](https://talk2term.prodevs.in/)
+2. Go to your account or API section and generate/copy your API key.
+3. Create a file at `~/.talk2term` in your home directory and paste your API key inside it:
+
+   ```sh
+   echo "YOUR_API_KEY_HERE" > ~/.talk2term
+   ```
+
+4. The plugin will automatically read your API key from this file.
+
+> **Note:** Keep your API key secure. Do not share it publicly.
+
+---
+
 ### ⚙️ Manual Installation
 
 1. **Clone the plugin**
@@ -113,18 +131,3 @@ Execute? (y/n)
 
 MIT © [ProDevs](https://prodevs.in)
 
-## 🔑 API Key Setup
-
-To use this plugin, you need an API key from [Talk2Term](https://talk2term.prodevs.in/):
-
-1. Sign up or log in at [https://talk2term.prodevs.in/](https://talk2term.prodevs.in/)
-2. Go to your account or API section and generate/copy your API key.
-3. Create a file at `~/.talk2term` in your home directory and paste your API key inside it:
-
-   ```sh
-   echo "YOUR_API_KEY_HERE" > ~/.talk2term
-   ```
-
-4. The plugin will automatically read your API key from this file.
-
-> **Note:** Keep your API key secure. Do not share it publicly.
