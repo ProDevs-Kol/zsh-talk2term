@@ -17,9 +17,12 @@ Talk2Term ZSH Plugin Usage:
   t2t <your prompt>     # Free (Lite)
   t2t-p <your prompt>   # Paid (Pro)
   t2t-credit           # Check credits
+  t2t-reset            # Reset conversation context
+  t2t-context          # Show recent conversation
 
 Examples:
   t2t list all files modified today
+  t2t now show only .js files      # Uses conversation context
   t2t-p find all .py files recursively
 
 Get your API key from: https://talk2term.prodevs.in/profile
@@ -30,6 +33,18 @@ EOF
 T2T_API_URL="https://talk2term.prodevs.in/api/zsh-talk2term/convert"
 # T2T_API_URL="http://localhost:3000/api/zsh-talk2term/convert"
 T2T_KEY_FILE="$HOME/.talk2term"
+
+# --- SESSION MANAGEMENT ---
+# Generate unique terminal window ID based on TTY and process info
+_t2t_get_terminal_id() {
+  echo "${TTY}:$$:$(date +%s)" | sha256sum | cut -c1-16 2>/dev/null || echo "${TTY}:$$" | head -c 16
+}
+
+# Session storage
+if [[ -z "$T2T_SESSION_ID" ]]; then
+  T2T_TERMINAL_ID=$(_t2t_get_terminal_id)
+  T2T_SESSION_ID=""  # Will be set by API response
+fi
 
 # --- SPINNER ---
 _t2t_spinner() {
@@ -92,7 +107,7 @@ _t2t_handle() {
   curl -sS -X POST "$T2T_API_URL" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $api_key" \
-    --data "{\"prompt\": \"$prompt\", \"model\": \"$model\"}" \
+    --data "{\"prompt\": \"$prompt\", \"model\": \"$model\", \"terminal_window_id\": \"$T2T_TERMINAL_ID\", \"session_id\": \"$T2T_SESSION_ID\"}" \
     > "$tmpfile" 2>&1
   printf "\r%*s\r\n" $(tput cols 2>/dev/null || echo 80) " " # clear line and print newline
 
@@ -112,9 +127,15 @@ _t2t_handle() {
     return 0
   fi
 
-  # Try to parse command
+  # Try to parse command and session ID
   command=$(echo "$resp" | jq -r '.command // empty')
   err=$(echo "$resp" | jq -r '.error // empty')
+  session_id=$(echo "$resp" | jq -r '.session_id // empty')
+  
+  # Update session ID if provided
+  if [[ -n "$session_id" && "$session_id" != "null" ]]; then
+    T2T_SESSION_ID="$session_id"
+  fi
 
   if [[ -n "$err" ]]; then
     if [[ "$err" == *"API key"* || "$err" == *"Invalid or inactive API key"* ]]; then
@@ -228,6 +249,79 @@ t2t-credit() {
     return 1
   fi
   print "[talk2term] Credits: $credits | Free Lite uses left today: $freeUsesLeft"
+}
+
+# --- SHELL COMMAND: t2t-reset ---
+t2t-reset() {
+  if [[ ! -f "$T2T_KEY_FILE" ]]; then
+    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
+    return 1
+  fi
+  local api_key
+  api_key=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
+  if [[ -z "$api_key" ]]; then
+    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
+    return 1
+  fi
+  
+  if [[ -n "$T2T_SESSION_ID" ]]; then
+    local base_url="${T2T_API_URL%/convert}"
+    local delete_url="${base_url}/conversation/$T2T_SESSION_ID"
+    curl -sS -X DELETE "$delete_url" \
+      -H "Authorization: Bearer $api_key" > /dev/null 2>&1
+  fi
+  
+  # Reset session variables
+  T2T_SESSION_ID=""
+  T2T_TERMINAL_ID=$(_t2t_get_terminal_id)
+  print "[talk2term] Conversation context reset."
+}
+
+# --- SHELL COMMAND: t2t-context ---
+t2t-context() {
+  if [[ ! -f "$T2T_KEY_FILE" ]]; then
+    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
+    return 1
+  fi
+  local api_key
+  api_key=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
+  if [[ -z "$api_key" ]]; then
+    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
+    return 1
+  fi
+  
+  if [[ -z "$T2T_SESSION_ID" ]]; then
+    print "[talk2term] No active conversation session."
+    return 0
+  fi
+  
+  local base_url="${T2T_API_URL%/convert}"
+  local get_url="${base_url}/conversation/$T2T_SESSION_ID"
+  local resp
+  resp=$(curl -sS -X GET "$get_url" \
+    -H "Authorization: Bearer $api_key" 2>/dev/null)
+    
+  if [[ $? -ne 0 ]] || [[ -z "$resp" ]]; then
+    print -u2 "[talk2term] Failed to fetch conversation context."
+    return 1
+  fi
+  
+  # Check if session exists
+  local error_msg
+  error_msg=$(echo "$resp" | jq -r '.error // empty' 2>/dev/null)
+  if [[ -n "$error_msg" && "$error_msg" != "null" ]]; then
+    if [[ "$error_msg" == *"not found"* ]]; then
+      print "[talk2term] No conversation history found."
+      T2T_SESSION_ID=""  # Reset if session doesn't exist
+    else
+      print -u2 "[talk2term] Error: $error_msg"
+    fi
+    return 1
+  fi
+  
+  # Display recent messages
+  print "[talk2term] Recent conversation:"
+  echo "$resp" | jq -r '.messages[-10:][] | "  \(.role): \(.content)"' 2>/dev/null || print "  Unable to parse conversation history."
 }
 
 # --- END OF FILE --- 
