@@ -193,14 +193,29 @@ _t2t_handle() {
   fi
 
   # --- PROMPT USER ---
-  print -Pn "\nTranslated Command: %B$command%b\nExecute? (y/n): "
+  print -P "\n%F{cyan}Translated Command:%f %B$command%b"
+
+  # Warn about potentially dangerous commands
+  if [[ "$command" == *"rm -rf"* || "$command" == *"sudo"* || "$command" == *"mkfs"* || "$command" == *"dd if="* || "$command" == *"> /dev/"* ]]; then
+    print -P "%F{red}Warning: This command may be destructive. Review carefully.%f"
+  fi
+
+  print -Pn "Execute? (y/n): "
   read -k 1 reply
   print
   if [[ "$reply" == [yY] ]]; then
     print "[talk2term] Executing: $command"
     eval "$command"
   else
-    print "[talk2term] Cancelled."
+    if command -v pbcopy >/dev/null 2>&1; then
+      echo -n "$command" | pbcopy
+      print "[talk2term] Cancelled. Command copied to clipboard."
+    elif command -v xclip >/dev/null 2>&1; then
+      echo -n "$command" | xclip -selection clipboard
+      print "[talk2term] Cancelled. Command copied to clipboard."
+    else
+      print "[talk2term] Cancelled."
+    fi
   fi
   if [[ -n $ZLE_LINE_EDITOR ]]; then zle reset-prompt; fi
   return 0
