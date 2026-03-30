@@ -1,0 +1,4 @@
+# Force LF line endings on all text files.
+# WHY: ZSH scripts break with CRLF (\r becomes part of commands).
+# Windows/WSL users cloning with core.autocrlf=true would get broken scripts without this.
+* text=auto eol=lf
