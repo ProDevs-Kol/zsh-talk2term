@@ -29,6 +29,24 @@ Get your API key from: https://talk2term.prodevs.in/profile
 EOF
 }
 
+# --- SHARED HELPERS ---
+
+# Read API key from config file.
+# Returns 0 on success (key in $REPLY), 1 on failure (error printed).
+_t2t_read_api_key() {
+  if [[ ! -f "$T2T_KEY_FILE" ]]; then
+    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
+    print -u2 "  Create it with: echo 'YOUR_KEY' > $T2T_KEY_FILE"
+    return 1
+  fi
+  REPLY=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
+  if [[ -z "$REPLY" ]]; then
+    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
+    return 1
+  fi
+  return 0
+}
+
 # --- CONFIG ---
 T2T_API_URL="https://talk2term.prodevs.in/api/zsh-talk2term/convert"
 # T2T_API_URL="http://localhost:3000/api/zsh-talk2term/convert"
@@ -86,19 +104,11 @@ _t2t_handle() {
   fi
 
   # --- Read API Key ---
-  if [[ ! -f "$T2T_KEY_FILE" ]]; then
-    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
-    print -u2 "  Please create this file and paste your API key from /profile."
+  if ! _t2t_read_api_key; then
     if [[ -n $ZLE_LINE_EDITOR ]]; then zle reset-prompt; fi
     return 0
   fi
-  local api_key
-  api_key=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
-  if [[ -z "$api_key" ]]; then
-    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
-    if [[ -n $ZLE_LINE_EDITOR ]]; then zle reset-prompt; fi
-    return 0
-  fi
+  local api_key="$REPLY"
 
   # --- API CALL (synchronous, no background job) ---
   local tmpfile
@@ -220,17 +230,8 @@ t2t-p() {
 
 # --- SHELL COMMAND: t2t-credit ---
 t2t-credit() {
-  if [[ ! -f "$T2T_KEY_FILE" ]]; then
-    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
-    print -u2 "  Please create this file and paste your API key from /profile."
-    return 1
-  fi
-  local api_key
-  api_key=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
-  if [[ -z "$api_key" ]]; then
-    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
-    return 1
-  fi
+  if ! _t2t_read_api_key; then return 1; fi
+  local api_key="$REPLY"
   local resp credits freeUsesLeft err
   local credits_url="${T2T_API_URL%/convert}/credits"
   resp=$(curl -sS -X GET "$credits_url" \
@@ -253,16 +254,8 @@ t2t-credit() {
 
 # --- SHELL COMMAND: t2t-reset ---
 t2t-reset() {
-  if [[ ! -f "$T2T_KEY_FILE" ]]; then
-    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
-    return 1
-  fi
-  local api_key
-  api_key=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
-  if [[ -z "$api_key" ]]; then
-    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
-    return 1
-  fi
+  if ! _t2t_read_api_key; then return 1; fi
+  local api_key="$REPLY"
   
   if [[ -n "$T2T_SESSION_ID" ]]; then
     local base_url="${T2T_API_URL%/convert}"
@@ -279,16 +272,8 @@ t2t-reset() {
 
 # --- SHELL COMMAND: t2t-context ---
 t2t-context() {
-  if [[ ! -f "$T2T_KEY_FILE" ]]; then
-    print -u2 "[talk2term] API key file not found: $T2T_KEY_FILE"
-    return 1
-  fi
-  local api_key
-  api_key=$(head -n 1 "$T2T_KEY_FILE" | tr -d '\r\n')
-  if [[ -z "$api_key" ]]; then
-    print -u2 "[talk2term] API key is empty in $T2T_KEY_FILE."
-    return 1
-  fi
+  if ! _t2t_read_api_key; then return 1; fi
+  local api_key="$REPLY"
   
   if [[ -z "$T2T_SESSION_ID" ]]; then
     print "[talk2term] No active conversation session."
