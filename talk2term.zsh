@@ -59,9 +59,8 @@ _t2t_build_json() {
 }
 
 # --- CONFIG ---
-T2T_API_URL="https://talk2term.prodevs.in/api/zsh-talk2term/convert"
-# T2T_API_URL="http://localhost:3000/api/zsh-talk2term/convert"
-T2T_KEY_FILE="$HOME/.talk2term"
+T2T_API_URL="${T2T_API_URL:-https://talk2term.prodevs.in/api/zsh-talk2term/convert}"
+T2T_KEY_FILE="${T2T_KEY_FILE:-$HOME/.talk2term}"
 
 # --- SESSION MANAGEMENT ---
 # Generate unique terminal window ID based on TTY and process info
