@@ -11,6 +11,36 @@
 # API Key: Store your API key (from /profile) in ~/.talk2term as a single line.
 #   Example: echo "sk-..." > ~/.talk2term
 
+# --- OPTION ISOLATION ---
+# Prevents user shell options from affecting plugin behavior (and vice versa).
+emulate -L zsh
+setopt extended_glob no_short_loops
+
+# --- RUNTIME DEPENDENCY CHECK ---
+# If installed via antigen/zinit (not install.sh), deps were never checked.
+{
+  local -a _t2t_missing=()
+  (( $+commands[curl] )) || _t2t_missing+=(curl)
+  (( $+commands[jq] ))   || _t2t_missing+=(jq)
+
+  if (( ${#_t2t_missing} )); then
+    print -P "%F{red}[talk2term]%f Missing dependencies: ${_t2t_missing[*]}" >&2
+    print -P "%F{yellow}[talk2term]%f Install with:" >&2
+    if (( $+commands[brew] )); then
+      print -P "  brew install ${_t2t_missing[*]}" >&2
+    elif (( $+commands[apt-get] )); then
+      print -P "  sudo apt-get install ${_t2t_missing[*]}" >&2
+    elif (( $+commands[pacman] )); then
+      print -P "  sudo pacman -S ${_t2t_missing[*]}" >&2
+    elif (( $+commands[dnf] )); then
+      print -P "  sudo dnf install ${_t2t_missing[*]}" >&2
+    else
+      print -P "  Please install: ${_t2t_missing[*]}" >&2
+    fi
+    return 1
+  fi
+}
+
 _t2t_help() {
   cat <<EOF
 Talk2Term ZSH Plugin Usage:
@@ -58,9 +88,56 @@ _t2t_build_json() {
     '{prompt: $prompt, model: $model, terminal_window_id: $terminal_window_id, session_id: $session_id}'
 }
 
+# Copy text to clipboard — supports macOS, Linux (X11 + Wayland), WSL, MSYS2/Cygwin.
+_t2t_clipboard_copy() {
+  case "$_T2T_PLATFORM" in
+    macos)
+      pbcopy
+      ;;
+    wsl)
+      clip.exe
+      ;;
+    linux)
+      if (( $+commands[xclip] )); then
+        xclip -selection clipboard
+      elif (( $+commands[xsel] )); then
+        xsel --clipboard --input
+      elif (( $+commands[wl-copy] )); then
+        wl-copy
+      else
+        return 1
+      fi
+      ;;
+    windows-native)
+      cat > /dev/clipboard 2>/dev/null || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 # --- CONFIG ---
-T2T_API_URL="${T2T_API_URL:-https://talk2term.prodevs.in/api/zsh-talk2term/convert}"
-T2T_KEY_FILE="${T2T_KEY_FILE:-$HOME/.talk2term}"
+# typeset -g prevents re-assignment on re-source. Override in .zshrc BEFORE sourcing.
+(( ! ${+T2T_API_URL} ))  && typeset -g T2T_API_URL='https://talk2term.prodevs.in/api/zsh-talk2term/convert'
+(( ! ${+T2T_KEY_FILE} )) && typeset -g T2T_KEY_FILE="$HOME/.talk2term"
+
+# --- PLATFORM DETECTION ---
+# Cached at source time (no repeated forks).
+typeset -g _T2T_PLATFORM
+if [[ "$OSTYPE" == darwin* ]]; then
+  _T2T_PLATFORM="macos"
+elif [[ "$OSTYPE" == linux* ]]; then
+  if [[ -f /proc/version ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+    _T2T_PLATFORM="wsl"
+  else
+    _T2T_PLATFORM="linux"
+  fi
+elif [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+  _T2T_PLATFORM="windows-native"
+else
+  _T2T_PLATFORM="unknown"
+fi
 
 # --- SESSION MANAGEMENT ---
 # Generate unique terminal window ID based on TTY and process info
@@ -129,7 +206,7 @@ _t2t_handle() {
 
   # --- API CALL (synchronous, no background job) ---
   local tmpfile
-  tmpfile=$(mktemp /tmp/t2t.XXXXXX)
+  tmpfile=$(mktemp "${TMPDIR:-/tmp}/t2t.XXXXXX")
   printf "[talk2term] Working...\r"
   local json_payload
   json_payload=$(_t2t_build_json "$prompt" "$model" "$T2T_TERMINAL_ID" "$T2T_SESSION_ID")
@@ -207,11 +284,7 @@ _t2t_handle() {
     print "[talk2term] Executing: $command"
     eval "$command"
   else
-    if command -v pbcopy >/dev/null 2>&1; then
-      echo -n "$command" | pbcopy
-      print "[talk2term] Cancelled. Command copied to clipboard."
-    elif command -v xclip >/dev/null 2>&1; then
-      echo -n "$command" | xclip -selection clipboard
+    if echo -n "$command" | _t2t_clipboard_copy 2>/dev/null; then
       print "[talk2term] Cancelled. Command copied to clipboard."
     else
       print "[talk2term] Cancelled."
