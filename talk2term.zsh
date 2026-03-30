@@ -168,12 +168,20 @@ _t2t_handle() {
   fi
 
   if [[ -n "$err" ]]; then
-    if [[ "$err" == *"API key"* || "$err" == *"Invalid or inactive API key"* ]]; then
+    if [[ "$err" == *"API key"* || "$err" == *"Invalid or inactive"* ]]; then
       print -u2 "[talk2term] Invalid or missing API key. Please check $T2T_KEY_FILE."
-    elif [[ "$err" == *"Insufficient credits"* ]]; then
-      print -u2 "Insufficient credits for this model."
+    elif [[ "$err" == *"Not enough credits"* || "$err" == *"free limit reached"* ]]; then
+      print -u2 "[talk2term] $err"
+      print -u2 "  Get more credits at: https://talk2term.prodevs.in"
+    elif [[ "$err" == *"deprecated"* ]]; then
+      print -u2 "[talk2term] This feature is no longer available. Please update the plugin."
     else
       print -u2 "[talk2term] API error: $err"
+    fi
+    local suggestion
+    suggestion=$(echo "$resp" | jq -r '.suggestion // empty')
+    if [[ -n "$suggestion" && "$suggestion" != "null" ]]; then
+      print -u2 "[talk2term] Suggestion: $suggestion"
     fi
     if [[ -n $ZLE_LINE_EDITOR ]]; then zle reset-prompt; fi
     return 0
