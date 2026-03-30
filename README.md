@@ -20,6 +20,8 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 ## 🚀 Installation
 
+> **Full installation guide:** See [INSTALL.md](INSTALL.md) for all methods (Oh My Zsh, Antigen, Zinit, zplug, Sheldon, Homebrew, Manual, WSL).
+
 ### 🟢 Easy One-Liner (Recommended)
 
 ```sh
@@ -112,9 +114,20 @@ Execute? (y/n)
 
 ## ❗Requirements
 
-* ZSH (works great with Oh My Zsh)
-* `curl` and `jq` installed
+* ZSH 5.8+ (works great with Oh My Zsh)
+* `curl` and `jq` installed (the plugin checks at load time)
 * Internet connection
+
+### Platform Support
+
+| Platform | Status |
+|----------|--------|
+| macOS | Fully supported |
+| Linux (X11) | Fully supported |
+| Linux (Wayland) | Fully supported (`wl-copy` for clipboard) |
+| Windows (WSL2) | Fully supported |
+| Windows (WSL1) | Supported |
+| Windows (MSYS2) | Basic support |
 
 ---
 
