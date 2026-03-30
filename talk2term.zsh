@@ -66,7 +66,14 @@ T2T_KEY_FILE="$HOME/.talk2term"
 # --- SESSION MANAGEMENT ---
 # Generate unique terminal window ID based on TTY and process info
 _t2t_get_terminal_id() {
-  echo "${TTY}:$$:$(date +%s)" | sha256sum | cut -c1-16 2>/dev/null || echo "${TTY}:$$" | head -c 16
+  local input="${TTY}:$$:$(date +%s)"
+  if command -v sha256sum >/dev/null 2>&1; then
+    echo "$input" | sha256sum | cut -c1-16
+  elif command -v shasum >/dev/null 2>&1; then
+    echo "$input" | shasum -a 256 | cut -c1-16
+  else
+    printf '%s' "$input" | od -An -tx1 | tr -d ' \n' | cut -c1-16
+  fi
 }
 
 # Session storage
