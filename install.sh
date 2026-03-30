@@ -31,24 +31,31 @@ else
   git clone --depth=1 "$PLUGIN_REPO" "$PLUGIN_DIR"
 fi
 
-# Ensure main plugin file is named talk2term.plugin.zsh
-if [ -f "$PLUGIN_DIR/talk2term.zsh" ] && [ ! -f "$PLUGIN_DIR/talk2term.plugin.zsh" ]; then
-  printf "Renaming talk2term.zsh to talk2term.plugin.zsh...\n"
-  mv "$PLUGIN_DIR/talk2term.zsh" "$PLUGIN_DIR/talk2term.plugin.zsh"
+# Verify plugin files exist
+if [ ! -f "$PLUGIN_DIR/talk2term.plugin.zsh" ] && [ ! -f "$PLUGIN_DIR/talk2term.zsh" ]; then
+  printf "Error: Plugin files not found in %s\n" "$PLUGIN_DIR"
+  exit 1
 fi
 
-# Add plugin to .zshrc if not present
+# Add plugin to .zshrc
 if [ -f "$ZSHRC" ]; then
-  if grep -q "plugins=.*$PLUGIN_NAME" "$ZSHRC"; then
-    printf "%s already present in plugins list.\n" "$PLUGIN_NAME"
-  else
-    printf "Adding %s to plugins list in %s...\n" "$PLUGIN_NAME" "$ZSHRC"
+  if grep -q "plugins=.*$PLUGIN_NAME" "$ZSHRC" || grep -q "talk2term" "$ZSHRC"; then
+    printf "%s already configured in %s.\n" "$PLUGIN_NAME" "$ZSHRC"
+  elif grep -q "^plugins=" "$ZSHRC"; then
+    # Oh My Zsh detected — add to plugins array
+    printf "Adding %s to Oh My Zsh plugins in %s...\n" "$PLUGIN_NAME" "$ZSHRC"
     cp "$ZSHRC" "$ZSHRC.bak.t2t"
-    # Cross-platform sed: use temp file instead of -i flag
     sed "/^plugins=/ s/)/ $PLUGIN_NAME)/" "$ZSHRC" > "$ZSHRC.t2t.tmp" && mv "$ZSHRC.t2t.tmp" "$ZSHRC"
+  else
+    # No Oh My Zsh — add source line directly
+    printf "Adding source line to %s...\n" "$ZSHRC"
+    cp "$ZSHRC" "$ZSHRC.bak.t2t"
+    printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$PLUGIN_DIR" >> "$ZSHRC"
   fi
 else
-  printf "Warning: %s not found. Add 'source %s/talk2term.plugin.zsh' to your shell config.\n" "$ZSHRC" "$PLUGIN_DIR"
+  printf "Warning: %s not found.\n" "$ZSHRC"
+  printf "Add this to your shell config:\n"
+  printf '  source "%s/talk2term.plugin.zsh"\n' "$PLUGIN_DIR"
 fi
 
 printf "\nInstallation complete!\n"
