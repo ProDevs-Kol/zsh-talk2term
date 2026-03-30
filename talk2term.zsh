@@ -80,6 +80,10 @@ _t2t_read_api_key() {
 # Build JSON payload safely using jq.
 # WHY: Direct string interpolation into JSON allows injection via quotes/backslashes.
 _t2t_build_json() {
+  if ! (( $+commands[jq] )); then
+    print -u2 "[talk2term] jq is no longer available. Please reinstall it."
+    return 1
+  fi
   jq -n \
     --arg prompt "$1" \
     --arg model "$2" \
@@ -144,9 +148,9 @@ fi
 _t2t_get_terminal_id() {
   local input="${TTY}:$$:$(date +%s)"
   if command -v sha256sum >/dev/null 2>&1; then
-    echo "$input" | sha256sum | cut -c1-16
+    printf '%s\n' "$input" | sha256sum | cut -c1-16
   elif command -v shasum >/dev/null 2>&1; then
-    echo "$input" | shasum -a 256 | cut -c1-16
+    printf '%s\n' "$input" | shasum -a 256 | cut -c1-16
   else
     printf '%s' "$input" | od -An -tx1 | tr -d ' \n' | cut -c1-16
   fi
@@ -157,22 +161,6 @@ if [[ -z "$T2T_SESSION_ID" ]]; then
   T2T_TERMINAL_ID=$(_t2t_get_terminal_id)
   T2T_SESSION_ID=""  # Will be set by API response
 fi
-
-# --- SPINNER ---
-_t2t_spinner() {
-  local pid=$1
-  local delay=0.1
-  local spinstr='|/-\\'
-  tput civis 2>/dev/null # hide cursor
-  while kill -0 $pid 2>/dev/null; do
-    local temp=${spinstr#?}
-    printf "\r[talk2term] Working... [%c]  " "$spinstr"
-    spinstr=$temp${spinstr%$temp}
-    sleep $delay
-  done
-  printf "\r[talk2term] Working...     \r"
-  tput cnorm 2>/dev/null # show cursor
-}
 
 # --- MAIN FUNCTION ---
 _t2t_handle() {
@@ -421,7 +409,7 @@ t2t-context() {
   
   # Display recent messages
   print "[talk2term] Recent conversation:"
-  echo "$resp" | jq -r '.messages[-10:][] | "  \(.role): \(.content)"' 2>/dev/null || print "  Unable to parse conversation history."
+  echo "$resp" | jq -r '.messages[-10:][] | "  \(.role): \(.content)"' 2>/dev/null || print -u2 "[talk2term] Unable to parse conversation history."
 }
 
 # --- END OF FILE --- 
