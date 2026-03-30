@@ -47,6 +47,17 @@ _t2t_read_api_key() {
   return 0
 }
 
+# Build JSON payload safely using jq.
+# WHY: Direct string interpolation into JSON allows injection via quotes/backslashes.
+_t2t_build_json() {
+  jq -n \
+    --arg prompt "$1" \
+    --arg model "$2" \
+    --arg terminal_window_id "$3" \
+    --arg session_id "$4" \
+    '{prompt: $prompt, model: $model, terminal_window_id: $terminal_window_id, session_id: $session_id}'
+}
+
 # --- CONFIG ---
 T2T_API_URL="https://talk2term.prodevs.in/api/zsh-talk2term/convert"
 # T2T_API_URL="http://localhost:3000/api/zsh-talk2term/convert"
@@ -114,10 +125,12 @@ _t2t_handle() {
   local tmpfile
   tmpfile=$(mktemp /tmp/t2t.XXXXXX)
   printf "[talk2term] Working...\r"
+  local json_payload
+  json_payload=$(_t2t_build_json "$prompt" "$model" "$T2T_TERMINAL_ID" "$T2T_SESSION_ID")
   curl -sS -X POST "$T2T_API_URL" \
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer $api_key" \
-    --data "{\"prompt\": \"$prompt\", \"model\": \"$model\", \"terminal_window_id\": \"$T2T_TERMINAL_ID\", \"session_id\": \"$T2T_SESSION_ID\"}" \
+    --data "$json_payload" \
     > "$tmpfile" 2>&1
   printf "\r%*s\r\n" $(tput cols 2>/dev/null || echo 80) " " # clear line and print newline
 
