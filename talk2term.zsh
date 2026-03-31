@@ -317,14 +317,14 @@ fi
 
 # --- SHELL COMMANDS ---
 t2t() {
-  if [[ $# -eq 0 ]]; then
+  if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" || "$1" == "help" ]]; then
     _t2t_help
     return 0
   fi
   _t2t_handle "t2t: $*"
 }
 t2t-p() {
-  if [[ $# -eq 0 ]]; then
+  if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" || "$1" == "help" ]]; then
     _t2t_help
     return 0
   fi
