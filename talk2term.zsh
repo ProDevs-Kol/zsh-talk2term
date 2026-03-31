@@ -49,6 +49,7 @@ Talk2Term ZSH Plugin Usage:
   t2t-credit           # Check credits
   t2t-reset            # Reset conversation context
   t2t-context          # Show recent conversation
+  t2t-update           # Update plugin to latest version
 
 Examples:
   t2t list all files modified today
@@ -410,6 +411,41 @@ t2t-context() {
   # Display recent messages
   print "[talk2term] Recent conversation:"
   echo "$resp" | jq -r '.messages[-10:][] | "  \(.role): \(.content)"' 2>/dev/null || print -u2 "[talk2term] Unable to parse conversation history."
+}
+
+# --- SHELL COMMAND: t2t-update ---
+t2t-update() {
+  local plugin_dir="${0:A:h}"
+  # Fallback: try common install locations
+  if [[ ! -d "$plugin_dir/.git" ]]; then
+    plugin_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/talk2term"
+  fi
+  if [[ ! -d "$plugin_dir/.git" ]]; then
+    plugin_dir="$HOME/.zsh/zsh-talk2term"
+  fi
+  if [[ ! -d "$plugin_dir/.git" ]]; then
+    print -u2 "[talk2term] Could not find plugin git directory."
+    print -u2 "  Run manually: cd <plugin-dir> && git pull"
+    return 1
+  fi
+
+  print "[talk2term] Updating from $plugin_dir..."
+  local old_version=""
+  [[ -f "$plugin_dir/.version" ]] && old_version=$(cat "$plugin_dir/.version")
+
+  if (cd "$plugin_dir" && git pull --quiet origin main 2>/dev/null); then
+    local new_version=""
+    [[ -f "$plugin_dir/.version" ]] && new_version=$(cat "$plugin_dir/.version")
+    if [[ -n "$old_version" && -n "$new_version" && "$old_version" != "$new_version" ]]; then
+      print "[talk2term] Updated: $old_version -> $new_version"
+    else
+      print "[talk2term] Already up to date."
+    fi
+    print "[talk2term] Reload with: source ~/.zshrc"
+  else
+    print -u2 "[talk2term] Update failed. Check your internet connection."
+    return 1
+  fi
 }
 
 # --- END OF FILE --- 
