@@ -382,19 +382,22 @@ _t2t_handle() {
     return 0
   fi
 
-  # Validate response is JSON before parsing
-  if ! echo "$resp" | jq empty 2>/dev/null; then
+  # Validate response is JSON before parsing.
+  # NOTE: must use printf '%s' (not echo) because zsh's echo interprets
+  # backslash escapes by default and would collapse "\\." to "\.", breaking
+  # any valid JSON whose string values contain backslashes (e.g. regexes).
+  if ! printf '%s' "$resp" | jq empty 2>/dev/null; then
     print -u2 "[talk2term] Invalid response from server (not JSON). Check your network/proxy."
-    print -u2 "[talk2term] Raw (truncated): ${resp[1,200]}"
+    print -r -u2 -- "[talk2term] Raw (truncated): ${resp[1,200]}"
     _t2t_maybe_reset_prompt
     return 0
   fi
 
   # Parse response fields
-  command=$(echo "$resp" | jq -r '.command // empty')
-  err=$(echo "$resp" | jq -r '.error // empty')
+  command=$(printf '%s' "$resp" | jq -r '.command // empty')
+  err=$(printf '%s' "$resp" | jq -r '.error // empty')
   local session_id
-  session_id=$(echo "$resp" | jq -r '.session_id // empty')
+  session_id=$(printf '%s' "$resp" | jq -r '.session_id // empty')
 
   # Validate and update session ID if provided
   if _t2t_validate_session_id "$session_id"; then
@@ -416,7 +419,7 @@ _t2t_handle() {
       print -u2 "[talk2term] API error: $err_safe"
     fi
     local suggestion
-    suggestion=$(echo "$resp" | jq -r '.suggestion // empty')
+    suggestion=$(printf '%s' "$resp" | jq -r '.suggestion // empty')
     if [[ -n "$suggestion" && "$suggestion" != "null" ]]; then
       local suggestion_safe
       suggestion_safe=$(printf '%s' "$suggestion" | _t2t_sanitize_output | head -c 200)
@@ -526,15 +529,15 @@ t2t-credit() {
     return 1
   fi
 
-  # Validate JSON
-  if ! echo "$resp" | jq empty 2>/dev/null; then
+  # Validate JSON (printf, not echo — see note above re: zsh echo escapes)
+  if ! printf '%s' "$resp" | jq empty 2>/dev/null; then
     print -u2 "[talk2term] Error connecting to Talk2Term server. Try again after some time."
     return 1
   fi
   local credits freeUsesLeft err
-  credits=$(echo "$resp" | jq -r '.credits // empty')
-  freeUsesLeft=$(echo "$resp" | jq -r '.freeUsesLeft // empty')
-  err=$(echo "$resp" | jq -r '.error // empty')
+  credits=$(printf '%s' "$resp" | jq -r '.credits // empty')
+  freeUsesLeft=$(printf '%s' "$resp" | jq -r '.freeUsesLeft // empty')
+  err=$(printf '%s' "$resp" | jq -r '.error // empty')
   if [[ -n "$err" ]]; then
     local err_safe
     err_safe=$(printf '%s' "$err" | _t2t_sanitize_output | head -c 300)
@@ -598,15 +601,15 @@ t2t-context() {
     return 1
   fi
 
-  # Validate JSON
-  if ! echo "$resp" | jq empty 2>/dev/null; then
+  # Validate JSON (printf, not echo — see note above re: zsh echo escapes)
+  if ! printf '%s' "$resp" | jq empty 2>/dev/null; then
     print -u2 "[talk2term] Invalid response from server."
     return 1
   fi
 
   # Check if session exists
   local error_msg
-  error_msg=$(echo "$resp" | jq -r '.error // empty' 2>/dev/null)
+  error_msg=$(printf '%s' "$resp" | jq -r '.error // empty' 2>/dev/null)
   if [[ -n "$error_msg" && "$error_msg" != "null" ]]; then
     if [[ "$error_msg" == *"not found"* ]]; then
       print "[talk2term] No conversation history found."
@@ -621,7 +624,7 @@ t2t-context() {
 
   # Display recent messages — sanitize output to prevent terminal escape injection
   print "[talk2term] Recent conversation:"
-  echo "$resp" | jq -r '.messages[-10:][] | "  \(.role): \(.content)"' 2>/dev/null \
+  printf '%s' "$resp" | jq -r '.messages[-10:][] | "  \(.role): \(.content)"' 2>/dev/null \
     | _t2t_sanitize_output \
     || print -u2 "[talk2term] Unable to parse conversation history."
 }
