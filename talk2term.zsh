@@ -254,7 +254,38 @@ _t2t_is_dangerous_command() {
   [[ "$lcmd" == *"sudo mkfs"* ]] && return 0
   [[ "$lcmd" == *"sudo dd "* ]] && return 0
 
+  # find -delete removes files. It also implies -depth, which disables -prune,
+  # so "find -path X -prune -o … -delete" deletes the path the user meant to keep.
+  [[ "$lcmd" =~ '(^|[^[:alnum:]_])-delete([^[:alnum:]_]|$)' ]] && return 0
+
+  # Uncatchable kill (kill -9 / SIGKILL), including `xargs kill -9`.
+  [[ "$lcmd" == *"sigkill"* ]] && return 0
+  [[ "$lcmd" =~ '(^|[^[:alnum:]_])kill[[:space:]]+(-9|-kill|-sigkill)([^[:alnum:]_]|$)' ]] && return 0
+  [[ "$lcmd" =~ '(^|[^[:alnum:]_])kill[[:space:]]+-s[[:space:]]+(9|kill|sigkill)([^[:alnum:]_]|$)' ]] && return 0
+
+  # Forced overwrites and history rewrites.
+  [[ "$lcmd" == *"--force"* ]] && return 0
+  [[ "$lcmd" == *"filter-repo"* ]] && return 0
+  [[ "$lcmd" == *"filter-branch"* ]] && return 0
+  [[ "$lcmd" == *"reset --hard"* ]] && return 0
+  [[ "$lcmd" =~ 'git[[:space:]]+push([^;&|]*[[:space:]])-f([^[:alnum:]_]|$)' ]] && return 0
+
   return 1  # Not dangerous
+}
+
+# Report a find expression that combines -prune with -delete.
+#
+# Args:
+#   cmd: Shell command text.
+#
+# Returns:
+#   0 when both -prune and -delete are present, 1 otherwise.
+#
+# -delete implies -depth, and -depth makes -prune a no-op, so the excluded
+# path is deleted. Callers must not execute the command.
+_t2t_find_prune_delete_conflict() {
+  local lcmd="${1:l}"
+  [[ "$lcmd" == *"-prune"* && "$lcmd" == *"-delete"* ]]
 }
 
 # --- CONFIG ---
@@ -444,6 +475,19 @@ _t2t_handle() {
   # Warn about potentially dangerous commands (best-effort denylist)
   if _t2t_is_dangerous_command "$command"; then
     print -P "%F{red}  WARNING: This command may be destructive. Review carefully before executing.%f"
+  fi
+
+  # Never run find -prune with -delete. -delete implies -depth, which
+  # disables -prune, so the excluded path is removed. Use -not -path.
+  if _t2t_find_prune_delete_conflict "$command"; then
+    print -u2 "[talk2term] Refusing to run find -prune with -delete. Use -not -path (or ! -path) instead of -prune."
+    if echo -n "$command" | _t2t_clipboard_copy 2>/dev/null; then
+      print "[talk2term] Cancelled. Command copied to clipboard."
+    else
+      print "[talk2term] Cancelled."
+    fi
+    _t2t_maybe_reset_prompt
+    return 0
   fi
 
   print -Pn "Execute? (y/n): "
