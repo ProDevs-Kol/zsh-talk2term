@@ -76,6 +76,80 @@ _t2t_maybe_reset_prompt() {
   [[ -n $ZLE_LINE_EDITOR ]] && zle reset-prompt
 }
 
+# Strip one surrounding markdown fence or backtick span.
+# Prints the command on stdout.
+# Returns 1 when the result is empty, 2 when the reply has multiple blocks.
+_t2t_normalize_command() {
+  emulate -L zsh
+  local text="$1" fence='```' fence_count body info rest inner line
+  local -a lines wrapped
+  text="${text//$'\r'/}"
+  text="${text#"${text%%[![:space:]]*}"}"
+  text="${text%"${text##*[![:space:]]}"}"
+  [[ -z "$text" ]] && return 1
+
+  fence_count=$(printf '%s' "$text" | grep -o '```' | wc -l | tr -d '[:space:]')
+  if (( fence_count > 0 )); then
+    if (( fence_count != 2 )) || [[ "${text[1,3]}" != "$fence" || "${text[-3,-1]}" != "$fence" ]]; then
+      return 2
+    fi
+    body="${text#$fence}"
+    body="${body%$fence}"
+    if [[ "$body" == *$'\n'* ]]; then
+      info="${body%%$'\n'*}"
+      rest="${body#*$'\n'}"
+      info="${info#"${info%%[![:space:]]*}"}"
+      info="${info%"${info##*[![:space:]]}"}"
+      if [[ -n "$info" && "$info" == *' '* ]]; then
+        body="${info}"$'\n'"${rest}"
+      else
+        body="$rest"
+      fi
+    fi
+    body="${body#"${body%%[![:space:]]*}"}"
+    body="${body%"${body##*[![:space:]]}"}"
+    [[ -z "$body" ]] && return 1
+    text="$body"
+  fi
+
+  lines=("${(@f)text}")
+  wrapped=()
+  for line in "${lines[@]}"; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" ]] && continue
+    if [[ "$line" == '`'*'`' ]]; then
+      inner="${line:1:-1}"
+      if [[ -n "$inner" && "$inner" != *'`'* ]]; then
+        wrapped+=("$line")
+      fi
+    fi
+  done
+  if (( ${#wrapped} > 1 )); then
+    return 2
+  fi
+
+  if [[ "$text" == '`'*'`' ]]; then
+    inner="${text:1:-1}"
+    inner="${inner#"${inner%%[![:space:]]*}"}"
+    inner="${inner%"${inner##*[![:space:]]}"}"
+    if [[ -n "$inner" && "$inner" != *'`'* ]]; then
+      printf '%s' "$inner"
+      return 0
+    fi
+    local stripped span_count
+    stripped=$(printf '%s' "$text" | sed -E 's/`[^`]*`//g')
+    stripped="${stripped//[[:space:]]/}"
+    span_count=$(printf '%s' "$text" | grep -o '`[^`]*`' | wc -l | tr -d '[:space:]')
+    if [[ -z "$stripped" && "$span_count" -gt 1 ]]; then
+      return 2
+    fi
+  fi
+
+  printf '%s' "$text"
+  return 0
+}
+
 # Derive the base URL (strip /convert) for subcommand endpoints.
 _t2t_base_url() {
   print -r -- "${T2T_API_URL%/convert}"
@@ -430,6 +504,20 @@ _t2t_handle() {
   fi
 
   if [[ -z "$command" || "$command" == "null" ]]; then
+    print -u2 "[talk2term] Invalid or empty response from API."
+    _t2t_maybe_reset_prompt
+    return 0
+  fi
+
+  local norm_status
+  command=$(_t2t_normalize_command "$command")
+  norm_status=$?
+  if (( norm_status == 2 )); then
+    print -u2 "[talk2term] Response contains multiple code blocks. Refusing to run."
+    _t2t_maybe_reset_prompt
+    return 0
+  fi
+  if (( norm_status != 0 )) || [[ -z "$command" || "$command" == "null" ]]; then
     print -u2 "[talk2term] Invalid or empty response from API."
     _t2t_maybe_reset_prompt
     return 0
