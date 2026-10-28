@@ -9,7 +9,7 @@ set -e
 PLUGIN_NAME="talk2term"
 PLUGIN_REPO="https://github.com/prodevs-kol/zsh-talk2term.git"
 # Keep in sync with .version (v prefix) and T2T_PLUGIN_REF in talk2term.zsh.
-PLUGIN_REF="v1.2.1"
+PLUGIN_REF="v1.2.2"
 
 # --- Dependency checks ---
 missing_deps=""
@@ -120,4 +120,4 @@ fi
 
 printf "\nInstallation complete (%s).\n" "$PLUGIN_REF"
 printf "To activate, run: source ~/.zshrc\n"
-printf "The first t2t command often takes 2–4 minutes. That is the API, not the installer.\n"
+printf "A t2t request takes about 20 seconds. That is the API, not the installer.\n"
