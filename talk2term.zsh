@@ -126,7 +126,7 @@ _t2t_validate_api_url() {
   if [[ "$url" == http://localhost:* || "$url" == http://127.0.0.1:* ]]; then
     return 0
   fi
-  # Allow user-configured trusted domains for self-hosted instances
+  # Allow extra origins listed in T2T_TRUSTED_DOMAINS.
   if [[ -n "$T2T_TRUSTED_DOMAINS" ]]; then
     local _domain
     for _domain in ${(s: :)T2T_TRUSTED_DOMAINS}; do
@@ -138,7 +138,7 @@ _t2t_validate_api_url() {
   print -u2 "[talk2term] SECURITY: Refusing to send API key to untrusted URL."
   print -u2 "  Current T2T_API_URL: $url"
   print -u2 "  Expected: https://talk2term.prodevs.in/..."
-  print -u2 "  If you self-host, set T2T_TRUSTED_DOMAINS before sourcing the plugin."
+  print -u2 "  To allow another origin, set T2T_TRUSTED_DOMAINS before sourcing the plugin."
   return 1
 }
 
@@ -262,9 +262,12 @@ _t2t_is_dangerous_command() {
 (( ! ${+T2T_API_URL} ))  && typeset -g T2T_API_URL='https://talk2term.prodevs.in/api/zsh-talk2term/convert'
 (( ! ${+T2T_KEY_FILE} )) && typeset -g T2T_KEY_FILE="$HOME/.talk2term"
 
-# Optional: additional trusted domains for self-hosted instances
-# Set T2T_TRUSTED_DOMAINS="https://myserver.com" before sourcing
+# Optional extra API origins. The supported service is https://talk2term.prodevs.in.
+# Set T2T_TRUSTED_DOMAINS="https://myserver.com" before sourcing to allow another origin.
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
+
+# Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.1"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -338,9 +341,11 @@ _t2t_handle() {
   fi
 
   # --- Read API Key ---
+  # A missing or empty key is a failed command. Exit non-zero so scripts
+  # and users can tell setup is incomplete.
   if ! _t2t_read_api_key; then
     _t2t_maybe_reset_prompt
-    return 0
+    return 1
   fi
   local api_key="$REPLY"
 
@@ -633,35 +638,31 @@ t2t-context() {
 t2t-update() {
   emulate -L zsh
   local plugin_dir="${0:A:h}"
-  # Fallback: try common install locations
+  # Fallback: try common install locations. No-OMZ installs live in ~/.zsh/talk2term.
   if [[ ! -d "$plugin_dir/.git" ]]; then
     plugin_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/talk2term"
+  fi
+  if [[ ! -d "$plugin_dir/.git" ]]; then
+    plugin_dir="$HOME/.zsh/talk2term"
   fi
   if [[ ! -d "$plugin_dir/.git" ]]; then
     plugin_dir="$HOME/.zsh/zsh-talk2term"
   fi
   if [[ ! -d "$plugin_dir/.git" ]]; then
     print -u2 "[talk2term] Could not find plugin git directory."
-    print -u2 "  Run manually: cd <plugin-dir> && git pull"
+    print -u2 "  Re-run the pinned installer for $T2T_PLUGIN_REF."
     return 1
   fi
 
-  print "[talk2term] Updating from $plugin_dir..."
-  local old_version=""
-  [[ -f "$plugin_dir/.version" ]] && old_version=$(cat "$plugin_dir/.version")
-
-  # Use git -C to avoid cd side effects
-  if git -C "$plugin_dir" pull origin main 2>&1; then
-    local new_version=""
-    [[ -f "$plugin_dir/.version" ]] && new_version=$(cat "$plugin_dir/.version")
-    if [[ -n "$old_version" && -n "$new_version" && "$old_version" != "$new_version" ]]; then
-      print "[talk2term] Updated: $old_version -> $new_version"
-    else
-      print "[talk2term] Already up to date."
-    fi
+  print "[talk2term] Checking out $T2T_PLUGIN_REF from $plugin_dir..."
+  # Stay on the pinned tag. A newer release is a new installer, not `git pull` of main.
+  if git -C "$plugin_dir" fetch --depth=1 origin "refs/tags/${T2T_PLUGIN_REF}:refs/tags/${T2T_PLUGIN_REF}" \
+    && git -C "$plugin_dir" checkout --detach "$T2T_PLUGIN_REF"; then
+    print "[talk2term] Checked out $T2T_PLUGIN_REF."
     print "[talk2term] Reload with: source ~/.zshrc"
   else
     print -u2 "[talk2term] Update failed. Check your internet connection."
+    print -u2 "  Or re-run the pinned installer for $T2T_PLUGIN_REF."
     return 1
   fi
 }
