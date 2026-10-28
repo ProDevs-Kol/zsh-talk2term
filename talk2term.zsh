@@ -257,6 +257,101 @@ _t2t_is_dangerous_command() {
   return 1  # Not dangerous
 }
 
+# Collect file names such as in.mp4, in first-seen order.
+#
+# Args:
+#   text: Prompt or shell command.
+#
+# Output:
+#   One file token per line. Names without an extension are omitted.
+_t2t_file_tokens() {
+  emulate -L zsh
+  local text="$1"
+  local -a tokens
+  local -A seen
+  local token rest="$text"
+  local MATCH MBEGIN MEND
+  while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._/-]*\.[[:alpha:]][[:alnum:]]{0,7}' ]]; do
+    token="$MATCH"
+    if [[ -z "$token" || -n "${seen[$token]}" ]]; then
+      rest="${rest[MEND+1,-1]}"
+      [[ -z "$token" ]] && break
+      continue
+    fi
+    seen[$token]=1
+    tokens+=("$token")
+    rest="${rest[MEND+1,-1]}"
+  done
+  if (( ${#tokens} )); then
+    print -r -- "${(F)tokens}"
+  fi
+}
+
+# Warn when a command drops a named file or uses a placeholder path.
+#
+# Daily tests 14 and 17 (28 Oct 2026): the model wrote /path/to/site for the
+# site folder and input.mp4 for in.mp4. Show this text before Execute?.
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#   command: Shell command returned for that request.
+#
+# Output:
+#   Warning text when the names need review. Prints nothing when they match.
+_t2t_named_target_warning() {
+  emulate -L zsh
+  local prompt="$1"
+  local command="$2"
+  local -a warnings prompt_names command_names dropped invented
+  local -a dropped_here invented_missing
+  local -A prompt_set command_set
+  local name lcmd="${command:l}"
+
+  if [[ "$lcmd" == *"/path/to/"* || "$lcmd" == *"/path/to "* || "$lcmd" == */path/to || "$lcmd" =~ '(^|[^[:alnum:]_-])(your_file|your_folder|your-file|<file>|<folder>|<path>)([^[:alnum:]_-]|$)' ]]; then
+    warnings+=("The command uses a placeholder path. Use the file or folder name from the request. Do not use /path/to/, your_file, or similar placeholders.")
+  fi
+
+  local raw
+  raw=$(_t2t_file_tokens "$prompt")
+  if [[ -n "$raw" ]]; then
+    prompt_names=("${(f)raw}")
+  fi
+  raw=$(_t2t_file_tokens "$command")
+  if [[ -n "$raw" ]]; then
+    command_names=("${(f)raw}")
+  fi
+  for name in "${prompt_names[@]}"; do
+    prompt_set[$name]=1
+  done
+  for name in "${command_names[@]}"; do
+    command_set[$name]=1
+  done
+  for name in "${prompt_names[@]}"; do
+    [[ -n "${command_set[$name]}" ]] || dropped+=("$name")
+  done
+  for name in "${command_names[@]}"; do
+    [[ -n "${prompt_set[$name]}" ]] || invented+=("$name")
+  done
+
+  if (( ${#dropped} && ${#invented} )); then
+    for name in "${dropped[@]}"; do
+      [[ -e "$name" ]] && dropped_here+=("$name")
+    done
+    for name in "${invented[@]}"; do
+      [[ -e "$name" ]] || invented_missing+=("$name")
+    done
+    if (( ${#dropped_here} && ${#invented_missing} )); then
+      warnings+=("${(j:, :)dropped_here} is in this directory, but the command uses ${(j:, :)invented_missing}, which is not here.")
+    else
+      warnings+=("The command does not use ${(j:, :)dropped} from the request. It uses ${(j:, :)invented} instead.")
+    fi
+  fi
+
+  if (( ${#warnings} )); then
+    print -r -- "${(j: :)warnings}"
+  fi
+}
+
 # --- CONFIG ---
 # typeset -g prevents re-assignment on re-source. Override in .zshrc BEFORE sourcing.
 (( ! ${+T2T_API_URL} ))  && typeset -g T2T_API_URL='https://talk2term.prodevs.in/api/zsh-talk2term/convert'
@@ -444,6 +539,20 @@ _t2t_handle() {
   # Warn about potentially dangerous commands (best-effort denylist)
   if _t2t_is_dangerous_command "$command"; then
     print -P "%F{red}  WARNING: This command may be destructive. Review carefully before executing.%f"
+  fi
+
+  # Warn when the model swapped a named file or folder for a placeholder.
+  # Prefer the local check (it can see this directory). Fall back to the
+  # server name_warning when this plugin build has nothing to add.
+  local name_warning
+  name_warning=$(_t2t_named_target_warning "$prompt" "$command")
+  if [[ -z "$name_warning" ]]; then
+    name_warning=$(printf '%s' "$resp" | jq -r '.name_warning // empty')
+    [[ "$name_warning" == "null" ]] && name_warning=""
+  fi
+  if [[ -n "$name_warning" ]]; then
+    print -P "%F{yellow}  WARNING:%f"
+    print -r -- "  $name_warning"
   fi
 
   print -Pn "Execute? (y/n): "
