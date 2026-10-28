@@ -24,15 +24,15 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 ### Pinned installer (recommended)
 
-Review the script, check the checksum, then run it. Tag: `v1.2.0`.
+Review the script, check the checksum, then run it. Tag: `v1.2.1`.
 
-- Script: [install.sh at v1.2.0](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.0/install.sh)
-- sha256: `13d0869d13d58671b5fe4c8e14f7e07e1e65df7fd21dac7764f1759a8fed4c80`
+- Script: [install.sh at v1.2.1](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.1/install.sh)
+- sha256: `b757bfe82a8507dae7d365c7196c37cb4b41330a1b04aa3b6751750f76ee814e`
 
 ```sh
-curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.0/install.sh
-echo "13d0869d13d58671b5fe4c8e14f7e07e1e65df7fd21dac7764f1759a8fed4c80  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "13d0869d13d58671b5fe4c8e14f7e07e1e65df7fd21dac7764f1759a8fed4c80  /tmp/talk2term-install.sh" | sha256sum -c -
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.1/install.sh
+echo "b757bfe82a8507dae7d365c7196c37cb4b41330a1b04aa3b6751750f76ee814e  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "b757bfe82a8507dae7d365c7196c37cb4b41330a1b04aa3b6751750f76ee814e  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 ```
 
@@ -54,7 +54,7 @@ To use this plugin, you need an API key from [Talk2Term](https://talk2term.prode
    t2t list files
    ```
 
-The installer finishes in a few seconds. The first `t2t` command waits on the API. Two to four minutes is typical. Success prints a translated command and `Execute? (y/n):`. The command text can differ. `ls` is typical for `t2t list files`. Answer `n` to cancel. Nothing runs until you answer `y`.
+The installer finishes in a few seconds. A `t2t` request takes about 20 seconds. That wait is the API. Success prints a translated command and `Execute? (y/n):`. The command text can differ. `ls` is typical for `t2t list files`. Answer `n` to cancel. Nothing runs until you answer `y`.
 
 If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 
@@ -67,13 +67,13 @@ If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 1. **Clone the plugin**
 
 ```bash
-git clone --depth 1 --branch v1.2.0 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.1 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
 No Oh My Zsh:
 
 ```bash
-git clone --depth 1 --branch v1.2.0 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.1 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
 ```
 

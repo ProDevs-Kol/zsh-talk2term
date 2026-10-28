@@ -267,7 +267,7 @@ _t2t_is_dangerous_command() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.0"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.1"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
