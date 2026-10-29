@@ -64,8 +64,9 @@ Quoting:
 
 File samples:
   A named .json, .csv, .tsv, .log, .txt, .yaml, .yml, .xml, or .toml file
-  can send structure (not secret values) to the API. The plugin prints
-  which file it sent. Set T2T_NO_FILE_SAMPLES=1 to send none.
+  can send structure (not secret values) to the API. Files under ~/.ssh,
+  ~/.gnupg, ~/.aws, ~/.kube, and ~/.config/gcloud are never sent. The
+  plugin prints which file it sent. Set T2T_NO_FILE_SAMPLES=1 to send none.
 
 Get your API key from: https://talk2term.prodevs.in/profile
 EOF
@@ -280,7 +281,64 @@ _t2t_sample_path_token() {
       *) break ;;
     esac
   done
+  if [[ "$file_path" == "~/"* ]]; then
+    file_path="${HOME}/${file_path#~/}"
+  fi
   print -r -- "$file_path"
+}
+
+# True when the resolved file lives in a credential directory.
+#
+# Args:
+#   resolved: Absolute path with symlinks resolved.
+#
+# Returns:
+#   0 when the path is under ~/.ssh, ~/.gnupg, ~/.aws, ~/.kube, or
+#   ~/.config/gcloud. Returns 1 otherwise.
+_t2t_sample_home_blocked() {
+  emulate -L zsh
+  local resolved="$1"
+  local home_dir dir
+  [[ -n "${HOME:-}" ]] || return 1
+  home_dir="${HOME:A}"
+  local -a blocked
+  blocked=(
+    "${home_dir}/.ssh"
+    "${home_dir}/.gnupg"
+    "${home_dir}/.aws"
+    "${home_dir}/.kube"
+    "${home_dir}/.config/gcloud"
+  )
+  for dir in "${blocked[@]}"; do
+    dir="${dir:A}"
+    [[ "$resolved" == "$dir" || "$resolved" == "$dir"/* ]] && return 0
+  done
+  return 1
+}
+
+# True when the file name is a known credential name.
+#
+# The check uses the base name, so a .txt or .yaml copy of .npmrc,
+# .pgpass, .git-credentials, kubeconfig, or a private key is still refused.
+#
+# Args:
+#   base: File name, not a directory path.
+#
+# Returns:
+#   0 when the name is denied, 1 otherwise.
+_t2t_sample_name_blocked() {
+  local base="${1:l}"
+  case "$base" in
+    .netrc|.netrc.*|*.netrc|*netrc*| \
+    .npmrc|.npmrc.*|*.npmrc|*npmrc*| \
+    .pgpass|.pgpass.*|*.pgpass|*pgpass*| \
+    .git-credentials|*.git-credentials|*git-credentials*| \
+    kubeconfig|kubeconfig.*|*.kubeconfig| \
+    id_*|*.pem|*.pem.*|*.key|*.key.*|*.gpg|*.gpg.*| \
+    .env|.env.*|*.env|*.env.*)
+      return 0 ;;
+  esac
+  return 1
 }
 
 # True when a file suffix is safe to describe to the API.
@@ -312,13 +370,18 @@ _t2t_file_sample_blocked() {
   local chunk
   chunk=$(head -c 65536 "$file_path" 2>/dev/null) || return 0
   [[ "$chunk" == -----BEGIN* ]] && return 0
+  [[ "$chunk" =~ 'BEGIN[[:space:]]+.*PRIVATE[[:space:]]+KEY' ]] && return 0
   # JSON puts a quote between the key and the colon: "aws_secret_access_key":
   local pat
-  pat='(password|passwd|token|secret|api[_-]?key|authToken|aws_secret)[A-Za-z0-9_-]*['
+  pat='(password|passwd|token|secret|api[_-]?key|authToken|aws_secret|client-key-data|client-certificate-data|auth|credential|bearer)[A-Za-z0-9_-]*['
   pat+='"'
   pat+="'"
   pat+=']?[[:space:]]*[:=]'
   if [[ "$chunk" =~ $pat ]]; then
+    return 0
+  fi
+  # Whole words only, so "author" and "authentication" stay eligible.
+  if [[ "$chunk" =~ '(^|[^[:alnum:]_])(auth|credential|bearer)([^[:alnum:]_]|$)' ]]; then
     return 0
   fi
   return 1
@@ -354,10 +417,12 @@ _t2t_build_file_sample() {
 # Append a short structural sample of allowlisted files named in the prompt.
 #
 # Only .json, .csv, .tsv, .log, .txt, .yaml, .yml, .xml, and .toml are
-# eligible. JSON contributes jq paths (keys). CSV and TSV contribute the
-# header row. Private keys and credential assignments are not sent.
-# Set T2T_NO_FILE_SAMPLES=1 to skip sampling. Each sent file is named on
-# stderr.
+# eligible. The real path is used, so a symlink into ~/.ssh, ~/.gnupg,
+# ~/.aws, ~/.kube, or ~/.config/gcloud is refused. Credential file names
+# are refused even when the suffix is allowlisted. JSON contributes jq
+# paths (keys). CSV and TSV contribute the header row. Private keys and
+# credential assignments are not sent. Set T2T_NO_FILE_SAMPLES=1 to skip
+# sampling. Each sent file is named on stderr.
 #
 # Args:
 #   prompt: The user request, which may name local files.
@@ -373,15 +438,19 @@ _t2t_attach_file_samples() {
   local -a tokens
   tokens=("${(z)prompt}")
   # file_path, not path: zsh ties path to PATH, so a local named path hides every external command.
-  local token file_path sample block="" count=0
+  local token file_path resolved sample block="" count=0
   for token in "${tokens[@]}"; do
     (( count >= 2 )) && break
     file_path=$(_t2t_sample_path_token "$token")
     [[ "$file_path" == -* || "$file_path" == http:* || "$file_path" == https:* ]] && continue
     [[ -f "$file_path" && -r "$file_path" ]] || continue
     _t2t_sample_suffix_allowed "${file_path:t}" || continue
-    _t2t_file_sample_blocked "$file_path" && continue
-    sample=$(_t2t_build_file_sample "$file_path")
+    _t2t_sample_name_blocked "${file_path:t}" && continue
+    resolved="${file_path:A}"
+    _t2t_sample_home_blocked "$resolved" && continue
+    _t2t_sample_name_blocked "${resolved:t}" && continue
+    _t2t_file_sample_blocked "$resolved" && continue
+    sample=$(_t2t_build_file_sample "$resolved")
     [[ -z "$sample" ]] && continue
     sample="${sample[1,800]}"
     block+="--- ${file_path} ---"$'\n'"${sample}"$'\n'
@@ -669,7 +738,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.4"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.5"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).

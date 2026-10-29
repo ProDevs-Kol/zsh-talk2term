@@ -184,6 +184,43 @@ notice=$(_t2t_attach_file_samples "show inventory.json" 2>&1 >/dev/null)
 opt=$(T2T_NO_FILE_SAMPLES=1 _t2t_attach_file_samples "show inventory.json" 2>/dev/null)
 [[ "$opt" != *"FILE STRUCTURE"* ]] || fail "T2T_NO_FILE_SAMPLES=1 still sampled"
 
+# Credential directories, symlink targets, and renamed copies.
+# HOME is a throwaway directory. Markers are fake.
+old_home=$HOME
+HOME="$root/fakehome"
+mkdir -p "$HOME/.ssh" "$HOME/.gnupg" "$HOME/.aws" "$HOME/.kube" "$HOME/.config/gcloud"
+printf '%s\n' 'FAKESSHNOTE' > "$HOME/.ssh/notes.txt"
+printf '%s\n' 'FAKEGPGNOTE' > "$HOME/.gnupg/notes.txt"
+printf '%s\n' 'FAKEAWSNOTE' > "$HOME/.aws/notes.txt"
+printf '%s\n' 'FAKEKUBENOTE' > "$HOME/.kube/notes.txt"
+printf '%s\n' 'FAKEGCLOUDNOTE' > "$HOME/.config/gcloud/notes.txt"
+printf '%s\n' 'hello-from-home' > "$HOME/ok.txt"
+ln -s "$HOME/.ssh/notes.txt" "$root/link.txt"
+printf '%s\n' 'client-key-data: FAKECLIENTKEY' 'client-certificate-data: FAKECLIENTCERT' > "$root/kubeconfig.yaml"
+printf '%s\n' 'client-key-data: FAKECLUSTERKEY' > "$root/cluster.yaml"
+printf '%s\n' '_authToken=FAKECOPYNPM' > "$root/npmrc.txt"
+printf '%s\n' 'localhost:5432:db:ada:FAKECOPYPG' > "$root/pgpass.txt"
+printf '%s\n' 'https://ada:FAKECOPYGIT@github.com' > "$root/git-credentials.txt"
+printf '%s\n' 'FAKEKEYCOPY' > "$root/prod.key.txt"
+printf '%s\n' '-----BEGIN PGP PRIVATE KEY BLOCK-----' 'FAKEGPGKEY' > "$root/copy.gpg.txt"
+assert_not_sent "read ~/.ssh/notes.txt" "FAKESSHNOTE"
+assert_not_sent "read ~/.gnupg/notes.txt" "FAKEGPGNOTE"
+assert_not_sent "read ~/.aws/notes.txt" "FAKEAWSNOTE"
+assert_not_sent "read ~/.kube/notes.txt" "FAKEKUBENOTE"
+assert_not_sent "read ~/.config/gcloud/notes.txt" "FAKEGCLOUDNOTE"
+assert_not_sent "read link.txt" "FAKESSHNOTE"
+assert_not_sent "read kubeconfig.yaml" "FAKECLIENTKEY"
+assert_not_sent "read kubeconfig.yaml" "FAKECLIENTCERT"
+assert_not_sent "read cluster.yaml" "FAKECLUSTERKEY"
+assert_not_sent "read npmrc.txt" "FAKECOPYNPM"
+assert_not_sent "read pgpass.txt" "FAKECOPYPG"
+assert_not_sent "read git-credentials.txt" "FAKECOPYGIT"
+assert_not_sent "read prod.key.txt" "FAKEKEYCOPY"
+assert_not_sent "read copy.gpg.txt" "FAKEGPGKEY"
+home_ok=$(_t2t_attach_file_samples "read $HOME/ok.txt" 2>/dev/null)
+[[ "$home_ok" == *"hello-from-home"* ]] || fail "a normal file in HOME was blocked: $home_ok"
+HOME=$old_home
+
 (
   PATH="$root/bin:$PATH"
   mkdir -p "$root/bin"
