@@ -97,7 +97,7 @@ find cache -type f -name '*.tmp' -mtime +7 ! -path 'cache/pinned/*' -delete
 # Values stay out of the sample.
 printf '%s\n' '{"meta":{"generated":"secret-value"},"data":{"services":[{"name":"billing","status":"down"},{"name":"mailer","status":"down"},{"name":"api","status":"up"}]}}' > services.json
 printf '%s\n' 'API_TOKEN=secret' > .env
-sample=$(_t2t_attach_file_samples "print the name of every service whose status is down in services.json")
+sample=$(_t2t_attach_file_samples "print the name of every service whose status is down in services.json" 2>/dev/null)
 [[ "$sample" == *"FILE STRUCTURE"* ]] || fail "services.json was not sampled"
 [[ "$sample" == *"data.services.0.name"* ]] || fail "sample missed data.services.0.name: $sample"
 [[ "$sample" == *"data.services.0.status"* ]] || fail "sample missed data.services.0.status: $sample"
@@ -106,6 +106,113 @@ sample=$(_t2t_attach_file_samples "print the name of every service whose status 
 env_sample=$(_t2t_attach_file_samples "show .env")
 [[ "$env_sample" != *"FILE STRUCTURE"* ]] || fail ".env was sampled"
 [[ "$env_sample" != *"API_TOKEN"* ]] || fail ".env contents were sent"
+
+# Secret names and credential assignments must not be uploaded.
+# Values below are fake markers, not real credentials.
+printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' 'FAKEKEYBODY' '-----END OPENSSH PRIVATE KEY-----' > id_ed25519
+printf '%s\n' '-----BEGIN EC PRIVATE KEY-----' 'FAKEECDSA' '-----END EC PRIVATE KEY-----' > id_ecdsa
+printf '%s\n' 'machine example.com login ada password FAKEPASS123' > .netrc
+printf '%s\n' 'apiVersion: v1' 'users:' '- name: fake' '  user:' '    token: FAKETOKEN123' > kubeconfig
+printf '%s\n' 'apiVersion: v1' 'users:' '- token: FAKETOKEN456' > prod.kubeconfig
+printf '%s\n' '//registry.npmjs.org/:_authToken=FAKENPM123' > .npmrc
+printf '%s\n' 'DB_PASSWORD=FAKEDB123' > prod.env
+printf '%s\n' 'APP_PASSWORD=FAKEAPP123' > app.env
+printf '%s\n' '[default]' 'aws_secret_access_key=FAKEAWS123' > aws_config
+printf '%s\n' 'not-a-real-certificate FAKEP12' > client.p12
+printf '%s\n' 'not-a-real-certificate FAKEPFX' > client.pfx
+printf '%s\n' 'localhost:5432:db:ada:FAKEPGPASS' > .pgpass
+printf '%s\n' 'https://ada:FAKEGITPASS@github.com' > .git-credentials
+printf '%s\n' '[pypi]' 'password = FAKEPYPI123' > .pypirc
+printf '%s\n' '{"password":"FAKETFSTATE"}' > terraform.tfstate
+printf '%s\n' 'Host example' 'IdentityFile ~/.ssh/id_ed25519' > config
+printf '%s\n' 'password=FAKETXT123' > notes.txt
+printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' 'FAKEJSONKEY' > disguised.json
+printf '%s\n' '{"aws_secret_access_key":"FAKEAWSJSON"}' > creds.json
+printf '%s\n' 'name: web' > app.yaml
+printf '%s\n' 'password: FAKEYAML123' > secretish.yaml
+printf '%s\n' 'name,role' 'billing,admin' > hosts.csv
+printf '%s\n' '{"hosts":["web-1"]}' > inventory.json
+
+assert_not_sent() {
+  local prompt="$1" marker="$2" sample
+  sample=$(_t2t_attach_file_samples "$prompt" 2>/dev/null)
+  [[ "$sample" != *"FILE STRUCTURE"* ]] || fail "sampled for: $prompt"
+  [[ "$sample" != *"$marker"* ]] || fail "marker leaked for: $prompt :: $sample"
+}
+
+assert_not_sent "show the fingerprint of id_ed25519" "FAKEKEYBODY"
+assert_not_sent "show the fingerprint of id_ecdsa" "FAKEECDSA"
+assert_not_sent "check .netrc syntax" "FAKEPASS123"
+assert_not_sent "list contexts in kubeconfig" "FAKETOKEN123"
+assert_not_sent "list contexts in prod.kubeconfig" "FAKETOKEN456"
+assert_not_sent "what registry does .npmrc use" "FAKENPM123"
+assert_not_sent "load prod.env" "FAKEDB123"
+assert_not_sent "load app.env" "FAKEAPP123"
+assert_not_sent "parse aws_config" "FAKEAWS123"
+assert_not_sent "inspect client.p12" "FAKEP12"
+assert_not_sent "inspect client.pfx" "FAKEPFX"
+assert_not_sent "read .pgpass" "FAKEPGPASS"
+assert_not_sent "read .git-credentials" "FAKEGITPASS"
+assert_not_sent "read .pypirc" "FAKEPYPI123"
+assert_not_sent "parse terraform.tfstate" "FAKETFSTATE"
+assert_not_sent "parse config" "IdentityFile"
+assert_not_sent "read notes.txt" "FAKETXT123"
+assert_not_sent "parse disguised.json" "FAKEJSONKEY"
+assert_not_sent "parse creds.json" "FAKEAWSJSON"
+assert_not_sent "read secretish.yaml" "FAKEYAML123"
+
+yaml_sample=$(_t2t_attach_file_samples "read app.yaml" 2>/dev/null)
+[[ "$yaml_sample" == *"FILE STRUCTURE"* ]] || fail "app.yaml was not sampled"
+[[ "$yaml_sample" == *"name: web"* ]] || fail "app.yaml structure missing: $yaml_sample"
+
+csv_sample=$(_t2t_attach_file_samples "rows in hosts.csv" 2>/dev/null)
+[[ "$csv_sample" == *"name,role"* ]] || fail "csv header missing: $csv_sample"
+[[ "$csv_sample" != *"billing"* ]] || fail "csv data row was sent: $csv_sample"
+
+inv=$(_t2t_attach_file_samples "hosts in inventory.json, sorted" 2>/dev/null)
+[[ "$inv" == *"hosts"* ]] || fail "comma after the name attached nothing: $inv"
+[[ "$inv" != *"web-1"* ]] || fail "json value leaked after comma: $inv"
+inv=$(_t2t_attach_file_samples "hosts in inventory.json." 2>/dev/null)
+[[ "$inv" == *"FILE STRUCTURE"* ]] || fail "full stop after the name attached nothing"
+inv=$(_t2t_attach_file_samples "hosts in (inventory.json)" 2>/dev/null)
+[[ "$inv" == *"FILE STRUCTURE"* ]] || fail "parentheses around the name attached nothing"
+[[ "$inv" != *"web-1"* ]] || fail "json value leaked from parenthesized name"
+
+notice=$(_t2t_attach_file_samples "show inventory.json" 2>&1 >/dev/null)
+[[ "$notice" == *"[talk2term] sent structure of inventory.json to the API"* ]] || fail "missing sample notice: $notice"
+
+opt=$(T2T_NO_FILE_SAMPLES=1 _t2t_attach_file_samples "show inventory.json" 2>/dev/null)
+[[ "$opt" != *"FILE STRUCTURE"* ]] || fail "T2T_NO_FILE_SAMPLES=1 still sampled"
+
+(
+  PATH="$root/bin:$PATH"
+  mkdir -p "$root/bin"
+  printf '%s\n' '#!/bin/sh' 'exit 1' > "$root/bin/jq"
+  chmod +x "$root/bin/jq"
+  hash -r
+  sample=$(_t2t_attach_file_samples "show services.json" 2>/dev/null)
+  [[ "$sample" != *"FILE STRUCTURE"* ]] || exit 1
+  [[ "$sample" != *"secret-value"* ]] || exit 1
+  [[ "$sample" != *"billing"* ]] || exit 1
+) || fail "json sample fell back to raw values when jq failed"
+
+hdr_path=""
+curl() {
+  local arg
+  : > "$root/argv-seen"
+  : > "$root/hdr-seen"
+  for arg in "$@"; do
+    print -r -- "$arg" >> "$root/argv-seen"
+    if [[ "$arg" == @* ]]; then
+      hdr_path="${arg#@}"
+      cat "$hdr_path" > "$root/hdr-seen"
+    fi
+  done
+}
+_t2t_curl "super-secret-key" -sS https://example.test >/dev/null
+[[ -n "$hdr_path" && ! -e "$hdr_path" ]] || fail "auth header file was left on disk"
+[[ "$(cat "$root/hdr-seen")" == "Authorization: Bearer super-secret-key" ]] || fail "header file missing bearer token"
+[[ "$(cat "$root/argv-seen")" != *super-secret-key* ]] || fail "api key was present in curl argv"
 
 rm -rf "$root"
 print "ok: destructive warning, prune/delete refusal, and file sample"

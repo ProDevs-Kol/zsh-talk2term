@@ -24,15 +24,15 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 ### Pinned installer (recommended)
 
-Review the script, check the checksum, then run it. Tag: `v1.2.3`.
+Review the script, check the checksum, then run it. Tag: `v1.2.4`.
 
-- Script: [install.sh at v1.2.3](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.3/install.sh)
-- sha256: `3b474019853802ad1cb4d5d65e2461e8526651aa14c40b5b24dba127e64e08b1`
+- Script: [install.sh at v1.2.4](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.4/install.sh)
+- sha256: `46f18e39496dff07c4de01745e22abb0edfb5357ccab621ac4134d8ab4484763`
 
 ```sh
-curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.3/install.sh
-echo "3b474019853802ad1cb4d5d65e2461e8526651aa14c40b5b24dba127e64e08b1  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "3b474019853802ad1cb4d5d65e2461e8526651aa14c40b5b24dba127e64e08b1  /tmp/talk2term-install.sh" | sha256sum -c -
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.4/install.sh
+echo "46f18e39496dff07c4de01745e22abb0edfb5357ccab621ac4134d8ab4484763  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "46f18e39496dff07c4de01745e22abb0edfb5357ccab621ac4134d8ab4484763  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 ```
 
@@ -67,13 +67,13 @@ If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 1. **Clone the plugin**
 
 ```bash
-git clone --depth 1 --branch v1.2.3 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.4 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
 No Oh My Zsh:
 
 ```bash
-git clone --depth 1 --branch v1.2.3 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.4 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
 ```
 
@@ -120,6 +120,12 @@ Execute? (y/n)
 * **Pro credits** are required for more advanced or critical tasks.
 * You can **purchase additional credits** at:
   👉 [https://talk2term.prodevs.in](https://talk2term.prodevs.in)
+
+---
+
+## File samples
+
+A prompt that names a local `.json`, `.csv`, `.tsv`, `.log`, `.txt`, `.yaml`, `.yml`, `.xml`, or `.toml` file can send that file's structure to the Talk2Term API. JSON sends keys only. CSV and TSV send the header row only. Other secret files, private keys, and lines that assign a password or token are not sent. The plugin prints `[talk2term] sent structure of <file> to the API` when it does this. Set `T2T_NO_FILE_SAMPLES=1` to send no file samples.
 
 ---
 

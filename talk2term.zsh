@@ -62,6 +62,11 @@ Quoting:
   before the shell parses it. In a script, quote the prompt:
     t2t 'show files where size < 10k'
 
+File samples:
+  A named .json, .csv, .tsv, .log, .txt, .yaml, .yml, .xml, or .toml file
+  can send structure (not secret values) to the API. The plugin prints
+  which file it sent. Set T2T_NO_FILE_SAMPLES=1 to send none.
+
 Get your API key from: https://talk2term.prodevs.in/profile
 EOF
 }
@@ -251,11 +256,108 @@ _t2t_build_json() {
     '{prompt: $prompt, model: $model, terminal_window_id: $terminal_window_id, session_id: $session_id}'
 }
 
-# Append a short structural sample of files named in the prompt.
+# Remove quotes and wrapping punctuation from one prompt word.
 #
-# JSON uses `jq paths` so the model sees keys (data.services.0.name) instead
-# of guessing a top-level array. Secret-like names are skipped. Values are
-# not sent for JSON.
+# Args:
+#   token: One shell word from the user prompt.
+#
+# Returns:
+#   The word with quotes, leading "(" or "[", and trailing ", . ; : ) ]" removed.
+_t2t_sample_path_token() {
+  local file_path="$1"
+  local last
+  file_path="${file_path//[\'\"]/}"
+  while true; do
+    case "$file_path" in
+      "("*| "["*) file_path="${file_path:1}" ;;
+      *) break ;;
+    esac
+  done
+  while [[ -n "$file_path" ]]; do
+    last="${file_path[-1]}"
+    case "$last" in
+      ","|"."|";"|":"|")"|"]") file_path="${file_path[1,-2]}" ;;
+      *) break ;;
+    esac
+  done
+  print -r -- "$file_path"
+}
+
+# True when a file suffix is safe to describe to the API.
+#
+# Args:
+#   base: File name, not a directory path.
+#
+# Returns:
+#   0 when the suffix is on the sample allowlist, 1 otherwise.
+_t2t_sample_suffix_allowed() {
+  local base="${1:l}"
+  case "$base" in
+    *.json|*.csv|*.tsv|*.log|*.txt|*.yaml|*.yml|*.xml|*.toml) return 0 ;;
+  esac
+  return 1
+}
+
+# True when file text looks like a key or a credential assignment.
+#
+# Args:
+#   file_path: Readable file to inspect. Only the first 64KiB is read.
+#
+# Returns:
+#   0 when the file must not be sampled, 1 when it may be described.
+_t2t_file_sample_blocked() {
+  emulate -L zsh
+  setopt nocasematch
+  local file_path="$1"
+  local chunk
+  chunk=$(head -c 65536 "$file_path" 2>/dev/null) || return 0
+  [[ "$chunk" == -----BEGIN* ]] && return 0
+  # JSON puts a quote between the key and the colon: "aws_secret_access_key":
+  local pat
+  pat='(password|passwd|token|secret|api[_-]?key|authToken|aws_secret)[A-Za-z0-9_-]*['
+  pat+='"'
+  pat+="'"
+  pat+=']?[[:space:]]*[:=]'
+  if [[ "$chunk" =~ $pat ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# Build a structure-only sample. JSON values and CSV data rows are omitted.
+#
+# Args:
+#   file_path: Allowlisted file that passed the secret check.
+#
+# Returns:
+#   Sample text on stdout. Empty when there is nothing safe to send.
+_t2t_build_file_sample() {
+  local file_path="$1"
+  local base="${${file_path:t}:l}"
+  local sample=""
+  case "$base" in
+    *.json)
+      if (( $+commands[jq] )); then
+        sample=$(jq -r '[paths][0:40][] | join(".")' "$file_path" 2>/dev/null | head -n 40) || sample=""
+      fi
+      ;;
+    *.csv|*.tsv)
+      sample=$(head -n 1 "$file_path" | head -c 500)
+      ;;
+    *)
+      sample=$(head -n 12 "$file_path" | head -c 500)
+      ;;
+  esac
+  print -r -- "$sample"
+}
+
+# Append a short structural sample of allowlisted files named in the prompt.
+#
+# Only .json, .csv, .tsv, .log, .txt, .yaml, .yml, .xml, and .toml are
+# eligible. JSON contributes jq paths (keys). CSV and TSV contribute the
+# header row. Private keys and credential assignments are not sent.
+# Set T2T_NO_FILE_SAMPLES=1 to skip sampling. Each sent file is named on
+# stderr.
 #
 # Args:
 #   prompt: The user request, which may name local files.
@@ -264,33 +366,26 @@ _t2t_build_json() {
 #   The prompt, plus a FILE STRUCTURE block when a readable file was sampled.
 _t2t_attach_file_samples() {
   local prompt="$1"
+  if [[ "${T2T_NO_FILE_SAMPLES:-}" == 1 ]]; then
+    print -r -- "$prompt"
+    return
+  fi
   local -a tokens
   tokens=("${(z)prompt}")
   # file_path, not path: zsh ties path to PATH, so a local named path hides every external command.
-  local token file_path sample block="" count=0 base first size
+  local token file_path sample block="" count=0
   for token in "${tokens[@]}"; do
     (( count >= 2 )) && break
-    file_path="${token//[\'\"]/}"
+    file_path=$(_t2t_sample_path_token "$token")
     [[ "$file_path" == -* || "$file_path" == http:* || "$file_path" == https:* ]] && continue
     [[ -f "$file_path" && -r "$file_path" ]] || continue
-    base="${file_path:t}"
-    case "$base" in
-      .env|.env.*|*.pem|*id_rsa*|credentials*|*.key|*secret*|*passwd*) continue ;;
-    esac
-    sample=""
-    size=$(wc -c < "$file_path" | tr -d '[:space:]')
-    first=$(head -c 1 "$file_path")
-    if (( size <= 262144 )) && [[ "$file_path" == *.json || "$first" == "{" || "$first" == "[" ]]; then
-      if (( $+commands[jq] )); then
-        sample=$(jq -r '[paths][0:40][] | join(".")' "$file_path" 2>/dev/null | head -n 40)
-      fi
-    fi
-    if [[ -z "$sample" ]]; then
-      sample=$(head -n 12 "$file_path" | head -c 500)
-    fi
+    _t2t_sample_suffix_allowed "${file_path:t}" || continue
+    _t2t_file_sample_blocked "$file_path" && continue
+    sample=$(_t2t_build_file_sample "$file_path")
     [[ -z "$sample" ]] && continue
     sample="${sample[1,800]}"
     block+="--- ${file_path} ---"$'\n'"${sample}"$'\n'
+    print -u2 "[talk2term] sent structure of ${file_path} to the API"
     count=$((count + 1))
   done
   if [[ -n "$block" ]]; then
@@ -298,6 +393,37 @@ _t2t_attach_file_samples() {
   else
     print -r -- "$prompt"
   fi
+}
+
+# Run curl with the API key in a mode-600 header file, not in argv.
+#
+# Other users on a shared host can read curl arguments from ps. The key
+# stays in a file that only this user can read, and that file is removed
+# when curl returns.
+#
+# Args:
+#   api_key: Bearer token. Must be a single line.
+#   ...: Arguments passed through to curl.
+#
+# Returns:
+#   Curl's exit status. The response stays on stdout.
+_t2t_curl() {
+  local api_key="$1"
+  shift
+  local hdr rc=1
+  if [[ "$api_key" == *$'\n'* || "$api_key" == *$'\r'* ]]; then
+    print -u2 "[talk2term] API key must be one line."
+    return 1
+  fi
+  hdr=$(umask 077; mktemp "${TMPDIR:-/tmp}/t2t-hdr.XXXXXX") || return 1
+  {
+    print -r -- "Authorization: Bearer ${api_key}" > "$hdr" || return 1
+    curl -H @"$hdr" "$@"
+    rc=$?
+  } always {
+    rm -f "$hdr"
+  }
+  return $rc
 }
 
 # Package-manager install line for a missing binary.
@@ -543,7 +669,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.3"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.4"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -646,9 +772,8 @@ _t2t_handle() {
   json_payload=$(_t2t_build_json "$prompt" "$model" "$T2T_TERMINAL_ID" "$T2T_SESSION_ID")
   # Use always block for guaranteed tmpfile cleanup (avoids trap leakage across functions)
   {
-    curl -sS -X POST "$T2T_API_URL" \
+    _t2t_curl "$api_key" -sS -X POST "$T2T_API_URL" \
       -H 'Content-Type: application/json' \
-      -H "Authorization: Bearer $api_key" \
       --max-time 30 \
       --data "$json_payload" \
       > "$tmpfile" 2>&1
@@ -842,10 +967,9 @@ t2t-credit() {
   if ! _t2t_validate_api_url "$T2T_API_URL"; then return 1; fi
 
   local resp
-  if ! resp=$(curl -sS -X GET "$(_t2t_base_url)/credits" \
+  if ! resp=$(_t2t_curl "$api_key" -sS -X GET "$(_t2t_base_url)/credits" \
     --max-time 15 \
-    -H 'Content-Type: application/json' \
-    -H "Authorization: Bearer $api_key"); then
+    -H 'Content-Type: application/json'); then
     print -u2 "[talk2term] Failed to connect to server."
     return 1
   fi
@@ -878,9 +1002,9 @@ t2t-reset() {
 
   if [[ -n "$T2T_SESSION_ID" ]]; then
     if _t2t_validate_session_id "$T2T_SESSION_ID"; then
-      curl -sS -X DELETE "$(_t2t_base_url)/conversation/$T2T_SESSION_ID" \
+      _t2t_curl "$api_key" -sS -X DELETE "$(_t2t_base_url)/conversation/$T2T_SESSION_ID" \
         --max-time 15 \
-        -H "Authorization: Bearer $api_key" > /dev/null 2>&1
+        > /dev/null 2>&1
     fi
   fi
 
@@ -910,9 +1034,9 @@ t2t-context() {
   fi
 
   local resp
-  if ! resp=$(curl -sS -X GET "$(_t2t_base_url)/conversation/$T2T_SESSION_ID" \
+  if ! resp=$(_t2t_curl "$api_key" -sS -X GET "$(_t2t_base_url)/conversation/$T2T_SESSION_ID" \
     --max-time 15 \
-    -H "Authorization: Bearer $api_key" 2>/dev/null); then
+    2>/dev/null); then
     print -u2 "[talk2term] Failed to fetch conversation context."
     return 1
   fi
