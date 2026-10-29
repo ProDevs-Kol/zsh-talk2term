@@ -257,6 +257,251 @@ _t2t_is_dangerous_command() {
   return 1  # Not dangerous
 }
 
+# Collect file names such as in.mp4, in first-seen order.
+#
+# Args:
+#   text: Prompt or shell command.
+#
+# Output:
+#   One file token per line. Names without an extension are omitted.
+_t2t_file_tokens() {
+  emulate -L zsh
+  local text="$1"
+  local -a tokens
+  local -A seen
+  local token rest="$text"
+  local MATCH MBEGIN MEND
+  while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._/-]*\.[[:alpha:]][[:alnum:]]{0,7}' ]]; do
+    token="$MATCH"
+    if [[ -z "$token" || -n "${seen[$token]}" ]]; then
+      rest="${rest[MEND+1,-1]}"
+      [[ -z "$token" ]] && break
+      continue
+    fi
+    seen[$token]=1
+    tokens+=("$token")
+    rest="${rest[MEND+1,-1]}"
+  done
+  if (( ${#tokens} )); then
+    print -r -- "${(F)tokens}"
+  fi
+}
+
+# Return 0 when a word is an instruction, not a file or folder name.
+#
+# Args:
+#   word: One word from the user request.
+_t2t_is_common_word() {
+  emulate -L zsh
+  local w="${1:l}"
+  case "$w" in
+    about|access|across|after|again|against|all|also|and|are|before|both|can|change|changing|complain|complaining|cut|did|does|each|every|everything|file|files|fix|folder|folders|for|from|give|here|including|into|its|just|keep|key|keys|later|make|need|not|only|other|owner|permission|permissions|please|private|public|read|same|second|seconds|should|stop|stops|than|that|the|them|then|there|these|they|this|those|through|under|until|use|used|user|using|want|when|where|will|with|without|write|your)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Print folder and file names from a request that are not instruction words.
+#
+# A word of four or more characters is a name when it is not a common word.
+# A shorter word is a name when it sits before "folder" or "directory".
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#
+# Output:
+#   One name per line.
+_t2t_prompt_target_names() {
+  emulate -L zsh
+  local prompt="$1"
+  local -a tokens
+  local -A seen
+  local word rest token
+  local MATCH MBEGIN MEND
+
+  rest="$prompt"
+  while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._/-]*[[:space:]]+(folder|directory|dir)s?' ]]; do
+    word="${MATCH%%[[:space:]]*}"
+    if [[ -n "$word" && -z "${seen[$word]}" ]]; then
+      seen[$word]=1
+      tokens+=("$word")
+    fi
+    rest="${rest[MEND+1,-1]}"
+  done
+
+  rest="$prompt"
+  while [[ -n "$rest" && "$rest" =~ '[[:alpha:]][[:alnum:]._/-]{3,}' ]]; do
+    word="$MATCH"
+    if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_common_word "$word"; then
+      seen[$word]=1
+      tokens+=("$word")
+    fi
+    rest="${rest[MEND+1,-1]}"
+    [[ -z "$word" ]] && break
+  done
+
+  if (( ${#tokens} )); then
+    print -r -- "${(F)tokens}"
+  fi
+}
+
+# Return 0 when the command uses a name as its own path token.
+#
+# "ssh" inside ~/.ssh is not a use of the name ssh.
+#
+# Args:
+#   command: Shell command.
+#   token: File or folder name from the request.
+_t2t_command_has_token() {
+  emulate -L zsh
+  local command="$1"
+  local token="$2"
+  [[ "$command" =~ "(^|[^[:alnum:]_.-])${token}([^[:alnum:]_.-]|$)" ]]
+}
+
+# Print well-known paths in a command that the request did not name.
+#
+# Daily test 8 (29 Oct 2026): the model wrote ~/.ssh for the sshdir folder.
+# Child paths collapse to the shortest path.
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#   command: Shell command returned for that request.
+#
+# Output:
+#   One path per line. Prints nothing when every such path was named.
+_t2t_invented_well_known_paths() {
+  emulate -L zsh
+  local prompt="${1//\$HOME/~}"
+  local command="${2//\$HOME/~}"
+  local -a found kept
+  local -A seen
+  local rest="$command" path parent keep
+  local MATCH MBEGIN MEND
+
+  while [[ -n "$rest" && "$rest" =~ '(^|[[:space:]="`=])(~/\.[[:alnum:]_-]+|~/(Downloads|Documents|Desktop|Library)(/[[:alnum:]._/-]+)*|/(etc|var/www)(/[[:alnum:]._/-]+)*)' ]]; do
+    path="$match[2]"
+    if [[ -n "$path" && -z "${seen[$path]}" ]]; then
+      seen[$path]=1
+      parent="$path"
+      keep=1
+      while [[ "$parent" == */* ]]; do
+        if [[ "$prompt" == *"$parent"* ]]; then
+          keep=0
+          break
+        fi
+        parent="${parent%/*}"
+        [[ "$parent" == "~" || -z "$parent" ]] && break
+      done
+      (( keep )) && found+=("$path")
+    fi
+    rest="${rest[MEND+1,-1]}"
+    [[ -z "$path" ]] && break
+  done
+
+  local item other
+  for item in "${found[@]}"; do
+    keep=1
+    for other in "${found[@]}"; do
+      [[ "$other" != "$item" && "$item" == "$other"/* ]] && keep=0
+    done
+    (( keep )) && kept+=("$item")
+  done
+
+  if (( ${#kept} )); then
+    print -r -- "${(F)kept}"
+  fi
+}
+
+# Warn when a command drops a named file or uses a placeholder path.
+#
+# Daily tests 14 and 17 (28 Oct 2026): the model wrote /path/to/site for the
+# site folder and input.mp4 for in.mp4. Daily test 8 (29 Oct 2026): the model
+# wrote ~/.ssh for sshdir. Show this text before Execute?.
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#   command: Shell command returned for that request.
+#
+# Output:
+#   Warning text when the names need review. Prints nothing when they match.
+_t2t_named_target_warning() {
+  emulate -L zsh
+  local prompt="$1"
+  local command="$2"
+  local -a warnings prompt_names command_names dropped invented
+  local -a dropped_here invented_missing
+  local -A prompt_set command_set
+  local name lcmd="${command:l}"
+
+  if [[ "$lcmd" == *"/path/to/"* || "$lcmd" == *"/path/to "* || "$lcmd" == */path/to || "$lcmd" =~ '(^|[^[:alnum:]_-])(your_file|your_folder|your-file|<file>|<folder>|<path>)([^[:alnum:]_-]|$)' ]]; then
+    warnings+=("The command uses a placeholder path. Use the file or folder name from the request. Do not use /path/to/, your_file, or similar placeholders.")
+  fi
+
+  local raw
+  raw=$(_t2t_file_tokens "$prompt")
+  if [[ -n "$raw" ]]; then
+    prompt_names=("${(f)raw}")
+  fi
+  raw=$(_t2t_file_tokens "$command")
+  if [[ -n "$raw" ]]; then
+    command_names=("${(f)raw}")
+  fi
+  for name in "${prompt_names[@]}"; do
+    prompt_set[$name]=1
+  done
+  for name in "${command_names[@]}"; do
+    command_set[$name]=1
+  done
+  for name in "${prompt_names[@]}"; do
+    [[ -n "${command_set[$name]}" ]] || dropped+=("$name")
+  done
+  for name in "${command_names[@]}"; do
+    [[ -n "${prompt_set[$name]}" ]] || invented+=("$name")
+  done
+
+  if (( ${#dropped} && ${#invented} )); then
+    for name in "${dropped[@]}"; do
+      [[ -e "$name" ]] && dropped_here+=("$name")
+    done
+    for name in "${invented[@]}"; do
+      [[ -e "$name" ]] || invented_missing+=("$name")
+    done
+    if (( ${#dropped_here} && ${#invented_missing} )); then
+      warnings+=("${(j:, :)dropped_here} is in this directory, but the command uses ${(j:, :)invented_missing}, which is not here.")
+    else
+      warnings+=("The command does not use ${(j:, :)dropped} from the request. It uses ${(j:, :)invented} instead.")
+    fi
+  fi
+
+  local -a invented_paths missing_names missing_here
+  raw=$(_t2t_invented_well_known_paths "$prompt" "$command")
+  if [[ -n "$raw" ]]; then
+    invented_paths=("${(f)raw}")
+  fi
+  raw=$(_t2t_prompt_target_names "$prompt")
+  if [[ -n "$raw" ]]; then
+    for name in "${(f)raw}"; do
+      _t2t_command_has_token "$command" "$name" || missing_names+=("$name")
+    done
+  fi
+  if (( ${#invented_paths} && ${#missing_names} )); then
+    for name in "${missing_names[@]}"; do
+      [[ -e "$name" ]] && missing_here+=("$name")
+    done
+    if (( ${#missing_here} )); then
+      warnings+=("${(j:, :)missing_here} is in this directory, but the command uses ${(j:, :)invented_paths}, which the request did not name.")
+    else
+      warnings+=("The command uses ${(j:, :)invented_paths}, which the request did not name. It does not use ${(j:, :)missing_names} from the request.")
+    fi
+  fi
+
+  if (( ${#warnings} )); then
+    print -r -- "${(j: :)warnings}"
+  fi
+}
+
 # --- CONFIG ---
 # typeset -g prevents re-assignment on re-source. Override in .zshrc BEFORE sourcing.
 (( ! ${+T2T_API_URL} ))  && typeset -g T2T_API_URL='https://talk2term.prodevs.in/api/zsh-talk2term/convert'
@@ -444,6 +689,20 @@ _t2t_handle() {
   # Warn about potentially dangerous commands (best-effort denylist)
   if _t2t_is_dangerous_command "$command"; then
     print -P "%F{red}  WARNING: This command may be destructive. Review carefully before executing.%f"
+  fi
+
+  # Warn when the model swapped a named file or folder for a placeholder.
+  # Prefer the local check (it can see this directory). Fall back to the
+  # server name_warning when this plugin build has nothing to add.
+  local name_warning
+  name_warning=$(_t2t_named_target_warning "$prompt" "$command")
+  if [[ -z "$name_warning" ]]; then
+    name_warning=$(printf '%s' "$resp" | jq -r '.name_warning // empty')
+    [[ "$name_warning" == "null" ]] && name_warning=""
+  fi
+  if [[ -n "$name_warning" ]]; then
+    print -P "%F{yellow}  WARNING:%f"
+    print -r -- "  $name_warning"
   fi
 
   print -Pn "Execute? (y/n): "
