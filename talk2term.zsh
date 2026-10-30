@@ -541,9 +541,147 @@ _t2t_install_hint() {
   esac
 }
 
+# True when a token separates commands rather than naming one.
+#
+# Args:
+#   word: One token from zsh word splitting.
+#
+# Returns:
+#   0 when word is ;, &&, ||, |, &, |&, or ;;. 1 otherwise.
+_t2t_is_shell_separator() {
+  case "$1" in
+    ';'|'&&'|'||'|'|'|'&'|'|&'|';;') return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# True when a shell word can be looked up as a command name.
+#
+# Globs such as */5 and bare numbers are schedule fields, not packages.
+#
+# Args:
+#   word: One token from zsh word splitting.
+#
+# Returns:
+#   0 when word can be a command name, 1 otherwise.
+_t2t_is_command_name() {
+  local word="$1"
+  case "$word" in
+    '['|'[['|']'|':'|'test'|'.') return 0 ;;
+  esac
+  [[ "$word" == *[*?\[]* ]] && return 1
+  if [[ "$word" == /* || "$word" == ./* || "$word" == ../* ]]; then
+    return 0
+  fi
+  [[ "$word" =~ '^[A-Za-z_][A-Za-z0-9_@+.,:-]*$' ]]
+}
+
+# True when a schedule line must be copied, not executed.
+#
+# Five cron fields, or an @daily nickname, are not a shell command.
+# zsh would expand */5 as a glob if the line were eval'd.
+#
+# Args:
+#   cmd: Shell command text returned by the API.
+#
+# Returns:
+#   0 when cmd is a crontab line, 1 otherwise.
+_t2t_is_cron_field() {
+  local field="$1"
+  case "$field" in
+    '*'|'@reboot'|'@yearly'|'@annually'|'@monthly'|'@weekly'|'@daily'|'@hourly'|'@midnight')
+      return 0
+      ;;
+  esac
+  [[ "$field" =~ '^[0-9]+([-,][0-9]+)*(/[0-9]+)?$|^\*/[0-9]+$|^[0-9]+-[0-9]+(/[0-9]+)?$|^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|sun|mon|tue|wed|thu|fri|sat)$' ]]
+}
+
+# True when the text is a crontab line.
+#
+# Args:
+#   cmd: Shell command text returned by the API.
+#
+# Returns:
+#   0 when cmd starts with a cron schedule, 1 otherwise.
+_t2t_is_crontab_line() {
+  local cmd="$1"
+  local -a words
+  words=("${(z)cmd}")
+  (( ${#words} >= 2 )) || return 1
+  case "$words[1]" in
+    '@reboot'|'@yearly'|'@annually'|'@monthly'|'@weekly'|'@daily'|'@hourly'|'@midnight')
+      return 0
+      ;;
+  esac
+  (( ${#words} >= 6 )) || return 1
+  local i
+  for i in 1 2 3 4 5; do
+    _t2t_is_cron_field "$words[$i]" || return 1
+  done
+  return 0
+}
+
+# True when the command changes the interactive shell and must not
+# run in a subshell.
+#
+# cd, export, source, and job-control builtins only stick when eval
+# runs in the user's shell. A bare assignment is the same.
+#
+# Args:
+#   cmd: Shell command text returned by the API.
+#
+# Returns:
+#   0 when the command must run in the current shell, 1 otherwise.
+_t2t_needs_current_shell() {
+  local cmd="$1"
+  local -a words
+  local w saw_command=0
+  words=("${(z)cmd}")
+  for w in "${words[@]}"; do
+    case "$w" in
+      cd|pushd|popd|chdir|export|typeset|declare|local|readonly|integer|float|unset|source|alias|unalias|setopt|unsetopt|hash|rehash|umask|limit|ulimit|fg|bg|disown|jobs|wait|zmodload|autoload|bindkey|zle|dirs|fc|set|unhash)
+        return 0
+        ;;
+      '.')
+        return 0
+        ;;
+    esac
+  done
+  for w in "${words[@]}"; do
+    _t2t_is_shell_separator "$w" && continue
+    case "$w" in
+      '{'|'}'|'('|')') continue ;;
+    esac
+    if [[ "$w" == [[:alpha:]_]*=* ]]; then
+      continue
+    fi
+    saw_command=1
+    break
+  done
+  (( saw_command == 0 )) && [[ "$cmd" == *=* ]]
+}
+
+# True when exit is a command word, not text inside a quoted argument.
+#
+# Args:
+#   cmd: Shell command text returned by the API.
+#
+# Returns:
+#   0 when a bare exit word is present, 1 otherwise.
+_t2t_has_bare_exit() {
+  local -a words
+  local w
+  words=("${(z)1}")
+  for w in "${words[@]}"; do
+    [[ "$w" == exit ]] && return 0
+  done
+  return 1
+}
+
 # Warn when the command's main binary is not installed.
 #
 # Prints "needs X: install with …" and does not block execution.
+# Separators, globs, and cron fields are not package names.
 #
 # Args:
 #   cmd: Shell command text returned by the API.
@@ -554,14 +692,29 @@ _t2t_warn_missing_tools() {
   local bin="" i=1 w hint
   while (( i <= ${#words} )); do
     w="${words[i]}"
+    if _t2t_is_shell_separator "$w"; then
+      i=$((i + 1))
+      continue
+    fi
     if [[ "$w" == [[:alpha:]_]*=* ]]; then
       i=$((i + 1))
       continue
     fi
     case "$w" in
-      sudo|command|time|nice|nohup|env|exec) i=$((i + 1)); continue ;;
+      sudo|command|builtin|time|nice|nohup|env|exec|noglob|nocorrect)
+        i=$((i + 1))
+        continue
+        ;;
+      if|then|else|elif|fi|for|while|until|do|done|case|esac|in|function|select|repeat|coproc|'{'|'}'|'('|')'|'!')
+        i=$((i + 1))
+        continue
+        ;;
     esac
     if [[ "$w" == -* ]]; then
+      i=$((i + 1))
+      continue
+    fi
+    if ! _t2t_is_command_name "$w"; then
       i=$((i + 1))
       continue
     fi
@@ -725,6 +878,35 @@ _t2t_is_dangerous_command() {
   [[ "$lcmd" == *"filter-branch"* ]] && return 0
   [[ "$lcmd" == *"reset --hard"* ]] && return 0
   [[ "$lcmd" =~ 'git[[:space:]]+push([^;&|]*[[:space:]])-f([^[:alnum:]_]|$)' ]] && return 0
+
+  # rm -f deletes without a prompt. -rf and -fr are already matched above.
+  [[ "$lcmd" =~ '(^|[^[:alnum:]_])rm[[:space:]](.*[[:space:]])?-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]] && return 0
+
+  # git clean -f / -fd / -fdx removes untracked files. -n is a dry run.
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])git[[:space:]]+clean[[:space:]]' ]]; then
+    if [[ "$lcmd" != *"--dry-run"* && ! "$lcmd" =~ '(^|[[:space:]])-n([^[:alnum:]_]|$)' ]]; then
+      if [[ "$lcmd" == *"--force"* || "$lcmd" =~ '(^|[[:space:]])-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]]; then
+        return 0
+      fi
+    fi
+  fi
+
+  # git checkout -f discards local edits. checkout -b does not.
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])git[[:space:]]+checkout[[:space:]]' ]]; then
+    if [[ "$lcmd" == *"--force"* || "$lcmd" =~ '(^|[[:space:]])-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]]; then
+      return 0
+    fi
+  fi
+
+  # git branch -D force-deletes. Lowercase -d only deletes a merged branch.
+  [[ "$cmd" =~ '(^|[^[:alnum:]_])git[[:space:]]+branch[[:space:]](.*[[:space:]])?-D([^[:alnum:]_]|$)' ]] && return 0
+
+  # docker image prune -f deletes unused images. container prune stays quiet.
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])docker[[:space:]]+image[[:space:]]+prune[[:space:]]' ]]; then
+    if [[ "$lcmd" == *"--force"* || "$lcmd" =~ '(^|[[:space:]])-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]]; then
+      return 0
+    fi
+  fi
 
   return 1  # Not dangerous
 }
@@ -973,12 +1155,24 @@ _t2t_handle() {
     return 0
   fi
 
+  # A crontab line is not a shell command. */5 is a glob under zsh.
+  if _t2t_is_crontab_line "$command"; then
+    print -u2 "[talk2term] This is a crontab line. It was not run."
+    if echo -n "$command" | _t2t_clipboard_copy 2>/dev/null; then
+      print "[talk2term] Copied. Install it with crontab -e."
+    else
+      print "[talk2term] Not run. Install it with crontab -e."
+    fi
+    _t2t_maybe_reset_prompt
+    return 0
+  fi
+
   print -Pn "Execute? (y/n): "
   read -k 1 reply
   print
   if [[ "$reply" == [yY] ]]; then
     print "[talk2term] Executing: $command"
-    eval "$command"
+    _t2t_run_returned_command "$command"
   else
     if echo -n "$command" | _t2t_clipboard_copy 2>/dev/null; then
       print "[talk2term] Cancelled. Command copied to clipboard."
@@ -988,6 +1182,30 @@ _t2t_handle() {
   fi
   _t2t_maybe_reset_prompt
   return 0
+}
+
+# Run an API command without letting exit close the user's terminal.
+#
+# Commands that must change the interactive shell (cd, export, source)
+# still eval there, unless they also call exit. Every other command
+# runs in a subshell, so exit and temporary variables stay inside it.
+#
+# Args:
+#   command: Shell command text returned by the API.
+#
+# Returns:
+#   The exit status of the command.
+_t2t_run_returned_command() {
+  emulate -L zsh
+  local command="$1"
+  if _t2t_needs_current_shell "$command" && ! _t2t_has_bare_exit "$command"; then
+    eval "$command"
+    return
+  fi
+  if _t2t_has_bare_exit "$command"; then
+    print -u2 "[talk2term] Running in a subshell so exit cannot close this terminal."
+  fi
+  ( eval "$command" )
 }
 
 # --- ZLE WIDGET & KEYBINDING ---

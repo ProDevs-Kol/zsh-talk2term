@@ -48,6 +48,13 @@ expect_dangerous "git push --force origin main"
 expect_dangerous "git push -f origin main"
 expect_dangerous "git reset --hard ORIG_HEAD"
 expect_dangerous "git reset --hard HEAD~1"
+expect_dangerous "git clean -fd"
+expect_dangerous "git clean -fdx"
+expect_dangerous "git checkout -f -- file"
+expect_dangerous "git branch -D feature-x"
+expect_dangerous "rm -f data.json.tmp"
+expect_dangerous "rm -r -f data.json.tmp"
+expect_dangerous "docker image prune -f"
 
 # Ordinary commands, and the TERM-first stop forms, must stay quiet.
 expect_safe "ls -la"
@@ -61,6 +68,13 @@ expect_safe "fuser -k -TERM 9123/tcp"
 expect_safe "fuser -k -SIGTERM 9123/tcp"
 expect_safe "pkill -TERM node"
 expect_safe "docker container prune -f"
+expect_safe "git clean -n"
+expect_safe "git clean --dry-run"
+expect_safe "git checkout -b feature-x"
+expect_safe "git checkout main"
+expect_safe "git branch -d feature-x"
+expect_safe "rm data.json.tmp"
+expect_safe "docker image prune"
 
 bad="find cache -path cache/pinned -prune -o -type f -name '*.tmp' -mtime +7 -delete"
 _t2t_find_prune_delete_conflict "$bad" || fail "prune+delete was not refused"
@@ -267,4 +281,59 @@ _t2t_curl "super-secret-key" -sS https://example.test >/dev/null
 [[ "$(cat "$root/argv-seen")" != *super-secret-key* ]] || fail "api key was present in curl argv"
 
 rm -rf "$root"
-print "ok: destructive warning, prune/delete refusal, and file sample"
+
+# 30 Oct 2026: separators and cron fields are not package names.
+hint=$(_t2t_warn_missing_tools 'i=0; while :; do echo hi; done' 2>&1 || true)
+[[ "$hint" != *"needs ;"* ]] || fail "semicolon was treated as a package: $hint"
+[[ "$hint" != *"needs while"* ]] || fail "while was treated as a package: $hint"
+hint=$(_t2t_warn_missing_tools '*/5 * * * * flock -n /tmp/sync.lock /opt/sync.sh >/dev/null 2>&1' 2>&1 || true)
+[[ "$hint" != *"needs */5"* ]] || fail "cron field was treated as a package: $hint"
+[[ "$hint" != *"needs *:"* ]] || fail "glob was treated as a package: $hint"
+hint=$(_t2t_warn_missing_tools 'this-binary-is-not-real --version' 2>&1 || true)
+[[ "$hint" == *"needs this-binary-is-not-real"* ]] || fail "missing binary was not reported: $hint"
+
+# A crontab line is detected and is not a normal command.
+_t2t_is_crontab_line '*/5 * * * * flock -n /tmp/sync.lock /opt/sync.sh >/dev/null 2>&1' \
+  || fail "crontab line was not detected"
+_t2t_is_crontab_line '5 0 * * 1 /opt/sync.sh' || fail "numeric crontab line was not detected"
+_t2t_is_crontab_line '@daily /opt/sync.sh' || fail "@daily line was not detected"
+_t2t_is_crontab_line 'ls -la' && fail "ls was treated as a crontab line"
+_t2t_is_crontab_line 'echo *' && fail "echo star was treated as a crontab line"
+_t2t_is_crontab_line 'crontab -l' && fail "crontab -l was treated as a schedule line"
+
+# exit must not close this shell, and its variables must not leak.
+# err_exit is on, so a real exit would kill this test before the checks.
+shell_out=$(
+  setopt no_err_exit
+  unset t2t_leak_code t2t_leak_i
+  _t2t_run_returned_command 't2t_leak_i=7; t2t_leak_code=503; exit 1' 2>&1 || true
+  print STILL_HERE
+  print "LEAK_I=${t2t_leak_i-unset}"
+  print "LEAK_CODE=${t2t_leak_code-unset}"
+) || true
+[[ "$shell_out" == *STILL_HERE* ]] || fail "exit closed the shell: $shell_out"
+[[ "$shell_out" == *LEAK_I=unset* ]] || fail "i leaked into the shell: $shell_out"
+[[ "$shell_out" == *LEAK_CODE=unset* ]] || fail "code leaked into the shell: $shell_out"
+[[ "$shell_out" == *"Running in a subshell"* ]] || fail "exit ran without the subshell note: $shell_out"
+
+cd /tmp
+start_pwd=$PWD
+cd_probe=$(mktemp -d)
+_t2t_run_returned_command "cd ${(q)cd_probe}"
+[[ "$PWD" == "$cd_probe" ]] || fail "cd did not stay in the current shell (pwd=$PWD)"
+cd "$start_pwd"
+rmdir "$cd_probe"
+
+cd_out=$(
+  setopt no_err_exit
+  _t2t_run_returned_command 'cd /tmp; exit 1' || true
+  print "PWD_AFTER=$PWD"
+) || true
+[[ "$cd_out" == *"PWD_AFTER=$PWD"* ]] || fail "cd with exit changed the shell or closed it: $cd_out"
+
+# Quoted exit text is not the exit builtin.
+_t2t_has_bare_exit 'echo "exit 1"' && fail "quoted exit was treated as the builtin"
+_t2t_has_bare_exit 'echo exit-now' && fail "exit-now was treated as the builtin"
+_t2t_has_bare_exit 'false || exit 1' || fail "bare exit was missed"
+
+print "ok: destructive warning, prune/delete refusal, file sample, and shell safety"
