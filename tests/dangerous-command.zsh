@@ -130,6 +130,12 @@ printf '%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' 'FAKEJSONKEY' > disguised.js
 printf '%s\n' '{"aws_secret_access_key":"FAKEAWSJSON"}' > creds.json
 printf '%s\n' 'name: web' > app.yaml
 printf '%s\n' 'password: FAKEYAML123' > secretish.yaml
+printf '\n%s\n%s\n' '-----BEGIN OPENSSH PRIVATE KEY-----' 'FAKEKEYNOTE' > keynote.txt
+printf '%s\n' 'Authorization: Bearer FAKEREADERTOKEN' > req.log
+printf '%s\n' 'DB_PASS=FAKEDBPASS' > settings.txt
+printf '%s\n' 'pwd=FAKEPWDVALUE' > local.txt
+printf '%s\n' 'passenger=ada' > people.txt
+printf '%s\n' 'compass=north' > nav.txt
 printf '%s\n' 'name,role' 'billing,admin' > hosts.csv
 printf '%s\n' '{"hosts":["web-1"]}' > inventory.json
 
@@ -160,10 +166,19 @@ assert_not_sent "read notes.txt" "FAKETXT123"
 assert_not_sent "parse disguised.json" "FAKEJSONKEY"
 assert_not_sent "parse creds.json" "FAKEAWSJSON"
 assert_not_sent "read secretish.yaml" "FAKEYAML123"
+assert_not_sent "read keynote.txt" "FAKEKEYNOTE"
+assert_not_sent "read req.log" "FAKEREADERTOKEN"
+assert_not_sent "read settings.txt" "FAKEDBPASS"
+assert_not_sent "read local.txt" "FAKEPWDVALUE"
 
 yaml_sample=$(_t2t_attach_file_samples "read app.yaml" 2>/dev/null)
 [[ "$yaml_sample" == *"FILE STRUCTURE"* ]] || fail "app.yaml was not sampled"
 [[ "$yaml_sample" == *"name: web"* ]] || fail "app.yaml structure missing: $yaml_sample"
+
+people_sample=$(_t2t_attach_file_samples "read people.txt" 2>/dev/null)
+[[ "$people_sample" == *"passenger=ada"* ]] || fail "passenger assignment was blocked: $people_sample"
+nav_sample=$(_t2t_attach_file_samples "read nav.txt" 2>/dev/null)
+[[ "$nav_sample" == *"compass=north"* ]] || fail "compass assignment was blocked: $nav_sample"
 
 csv_sample=$(_t2t_attach_file_samples "rows in hosts.csv" 2>/dev/null)
 [[ "$csv_sample" == *"name,role"* ]] || fail "csv header missing: $csv_sample"

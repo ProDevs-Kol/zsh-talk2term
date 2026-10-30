@@ -358,6 +358,11 @@ _t2t_sample_suffix_allowed() {
 
 # True when file text looks like a key or a credential assignment.
 #
+# `pass` and `pwd` match only as a whole name before `:` or `=`.
+# Underscore is a separator, so `DB_PASS` matches. `passenger` and
+# `compass` do not. A private-key header matches anywhere in the
+# first 64KiB, including after a blank line.
+#
 # Args:
 #   file_path: Readable file to inspect. Only the first 64KiB is read.
 #
@@ -382,6 +387,16 @@ _t2t_file_sample_blocked() {
   fi
   # Whole words only, so "author" and "authentication" stay eligible.
   if [[ "$chunk" =~ '(^|[^[:alnum:]_])(auth|credential|bearer)([^[:alnum:]_]|$)' ]]; then
+    return 0
+  fi
+  # pass/pwd are shorter than password. Require a name boundary so
+  # passenger= and compass= stay eligible, while DB_PASS= does not.
+  local passpat
+  passpat='(^|[^[:alnum:]])(pass|pwd)['
+  passpat+='"'
+  passpat+="'"
+  passpat+=']?[[:space:]]*[:=]'
+  if [[ "$chunk" =~ $passpat ]]; then
     return 0
   fi
   return 1
@@ -420,9 +435,10 @@ _t2t_build_file_sample() {
 # eligible. The real path is used, so a symlink into ~/.ssh, ~/.gnupg,
 # ~/.aws, ~/.kube, or ~/.config/gcloud is refused. Credential file names
 # are refused even when the suffix is allowlisted. JSON contributes jq
-# paths (keys). CSV and TSV contribute the header row. Private keys and
-# credential assignments are not sent. Set T2T_NO_FILE_SAMPLES=1 to skip
-# sampling. Each sent file is named on stderr.
+# paths (keys). CSV and TSV contribute the header row. Other allowlisted
+# files contribute the first 12 lines, cut at 500 bytes. Private keys and
+# credential assignments, including pass and pwd names, are not sent.
+# Set T2T_NO_FILE_SAMPLES=1 to skip sampling. Each sent file is named on stderr.
 #
 # Args:
 #   prompt: The user request, which may name local files.
@@ -738,7 +754,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.5"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.6"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
