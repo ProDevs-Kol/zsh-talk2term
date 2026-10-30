@@ -9,7 +9,7 @@ set -e
 PLUGIN_NAME="talk2term"
 PLUGIN_REPO="https://github.com/prodevs-kol/zsh-talk2term.git"
 # Keep in sync with .version (v prefix) and T2T_PLUGIN_REF in talk2term.zsh.
-PLUGIN_REF="v1.2.6"
+PLUGIN_REF="v1.2.7"
 
 # --- Dependency checks ---
 missing_deps=""
