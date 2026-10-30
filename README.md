@@ -5,13 +5,13 @@
 `zsh-talk2term` is a ZSH plugin for [Talk2Term](https://talk2term.prodevs.in), allowing you to type natural language prompts like:
 
 ```bash
-t2t: find all png files with "logo" in the current directory
+t2t find all png files with "logo" in the current directory
 ```
 
 Or unlock deeper capabilities using:
 
 ```bash
-t2t-p: deploy a Flask app to Heroku
+t2t-p deploy a Flask app to Heroku
 ```
 
 It instantly returns the equivalent shell command and asks for your confirmation before executing.
@@ -22,13 +22,21 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 > **Full installation guide:** See [INSTALL.md](INSTALL.md) for all methods (Oh My Zsh, Antigen, Zinit, zplug, Sheldon, Homebrew, Manual, WSL).
 
-### 🟢 Easy One-Liner (Recommended)
+### Pinned installer (recommended)
+
+Review the script, check the checksum, then run it. Tag: `v1.2.6`.
+
+- Script: [install.sh at v1.2.6](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.6/install.sh)
+- sha256: `81f7441921acbfcaaf7398d489360b095e896d209ff349f8e5a91402ba413e64`
 
 ```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/main/install.sh)"
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.6/install.sh
+echo "81f7441921acbfcaaf7398d489360b095e896d209ff349f8e5a91402ba413e64  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "81f7441921acbfcaaf7398d489360b095e896d209ff349f8e5a91402ba413e64  /tmp/talk2term-install.sh" | sha256sum -c -
+sh /tmp/talk2term-install.sh
 ```
 
-Paste this in your terminal to install the plugin instantly!
+Oh My Zsh is optional. Without it, the installer clones into `~/.zsh/talk2term`.
 
 ---
 
@@ -36,15 +44,19 @@ Paste this in your terminal to install the plugin instantly!
 
 To use this plugin, you need an API key from [Talk2Term](https://talk2term.prodevs.in/):
 
-1. Sign up or log in at [https://talk2term.prodevs.in/](https://talk2term.prodevs.in/)
-2. Go to your account or API section and generate/copy your API key.
-3. Create a file at `~/.talk2term` in your home directory and paste your API key inside it:
+1. Log in at [https://talk2term.prodevs.in/](https://talk2term.prodevs.in/) with the magic-link email.
+2. Open [https://talk2term.prodevs.in/profile](https://talk2term.prodevs.in/profile), generate a key if you do not have one, and copy it.
+3. Save the key and run a command:
 
    ```sh
-   echo "YOUR_API_KEY_HERE" > ~/.talk2term
+   echo "YOUR_API_KEY_HERE" > ~/.talk2term && chmod 600 ~/.talk2term
+   source ~/.zshrc
+   t2t list files
    ```
 
-4. The plugin will automatically read your API key from this file.
+The installer finishes in a few seconds. A `t2t` request takes about 20 seconds. That wait is the API. Success prints a translated command and `Execute? (y/n):`. The command text can differ. `ls` is typical for `t2t list files`. Answer `n` to cancel. Nothing runs until you answer `y`.
+
+If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 
 > **Note:** Keep your API key secure. Do not share it publicly.
 
@@ -55,10 +67,17 @@ To use this plugin, you need an API key from [Talk2Term](https://talk2term.prode
 1. **Clone the plugin**
 
 ```bash
-git clone https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.6 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
-2. **Add to your `.zshrc`**
+No Oh My Zsh:
+
+```bash
+git clone --depth 1 --branch v1.2.6 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
+```
+
+2. **Add to your `.zshrc`** (Oh My Zsh only; the no-Oh-My-Zsh clone above already appends a `source` line)
 
 ```bash
 plugins=(... talk2term)
@@ -76,13 +95,13 @@ source ~/.zshrc
 
 | Prefix   | Plan | Cost               | Use Case                             |
 | -------- | ---- | ------------------ | ------------------------------------ |
-| `t2t:`   | Lite | Free daily credits | Simple, everyday shell tasks         |
-| `t2t-p:` | Pro  | Paid credits       | Advanced, complex, or risky commands |
+| `t2t <prompt>`   | Lite | Free daily credits | Simple, everyday shell tasks         |
+| `t2t-p <prompt>` | Pro  | Paid credits       | Advanced, complex, or risky commands |
 
 ### Example:
 
 ```bash
-t2t: show running docker containers
+t2t show running docker containers
 ```
 
 Response:
@@ -104,6 +123,12 @@ Execute? (y/n)
 
 ---
 
+## File samples
+
+A prompt that names a local `.json`, `.csv`, `.tsv`, `.log`, `.txt`, `.yaml`, `.yml`, `.xml`, or `.toml` file can send that file's structure to the Talk2Term API. JSON sends keys only. CSV and TSV send the header row only. Files under `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, and `~/.config/gcloud` are not sent, including through a symlink. Credential names such as `.npmrc`, `.pgpass`, `.git-credentials`, `kubeconfig`, and `id_*` are not sent even when copied to an allowlisted suffix. The plugin prints `[talk2term] sent structure of <file> to the API` when it does this. Set `T2T_NO_FILE_SAMPLES=1` to send no file samples.
+
+---
+
 ## 🛡️ Safety & Confirmation
 
 * You always see the final command before execution.
@@ -114,8 +139,9 @@ Execute? (y/n)
 
 ## ❗Requirements
 
-* ZSH 5.8+ (works great with Oh My Zsh)
-* `curl` and `jq` installed (the plugin checks at load time)
+* ZSH 5.8+
+* `curl`, `jq`, and `git`
+* Oh My Zsh is optional
 * Internet connection
 
 ### Platform Support
@@ -136,7 +162,7 @@ Execute? (y/n)
 * Stop Googling terminal commands — just describe what you want
 * Smart fallback: confirm before execution
 * Great for learners and pros alike
-* Extendable and self-hosted — privacy-first
+* Prompts go to Talk2Term at talk2term.prodevs.in. You confirm every command before it runs.
 
 ---
 
