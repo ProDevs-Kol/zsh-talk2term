@@ -336,4 +336,36 @@ _t2t_has_bare_exit 'echo "exit 1"' && fail "quoted exit was treated as the built
 _t2t_has_bare_exit 'echo exit-now' && fail "exit-now was treated as the builtin"
 _t2t_has_bare_exit 'false || exit 1' || fail "bare exit was missed"
 
+# 1 Nov 2026: curl exit 28 must not be parsed as the API body.
+# The convert call used to redirect stderr into the body file, so the
+# timeout text was reported as "not JSON".
+if grep -F -A 6 '_t2t_curl "$api_key" -sS -X POST' "$src" | grep -F -q '> "$tmpfile" 2>&1'; then
+  fail "convert still mixes curl stderr into the body"
+fi
+
+timeout_key=$(mktemp)
+chmod 600 "$timeout_key"
+print -r -- 'test-key' > "$timeout_key"
+old_key_file=$T2T_KEY_FILE
+old_api_url=$T2T_API_URL
+T2T_KEY_FILE=$timeout_key
+T2T_API_URL='https://talk2term.prodevs.in/api/zsh-talk2term/convert'
+curl() {
+  print -u2 'curl: (28) Operation timed out after 30001 milliseconds with 0 bytes received'
+  return 28
+}
+timeout_dir=$(mktemp -d)
+timeout_out=$(
+  cd "$timeout_dir" || exit 1
+  _t2t_handle 't2t: list files' 2>&1 || true
+) || true
+T2T_KEY_FILE=$old_key_file
+T2T_API_URL=$old_api_url
+rm -f "$timeout_key"
+rm -rf "$timeout_dir"
+unset -f curl
+[[ "$timeout_out" == *"did not answer within 30 seconds"* ]] || fail "timeout was not reported: $timeout_out"
+[[ "$timeout_out" != *"Raw (truncated)"* ]] || fail "timeout stderr was treated as the body: $timeout_out"
+[[ "$timeout_out" != *"not JSON"* ]] || fail "timeout was parsed as a bad JSON body: $timeout_out"
+
 print "ok: destructive warning, prune/delete refusal, file sample, and shell safety"

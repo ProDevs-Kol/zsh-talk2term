@@ -936,7 +936,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.7"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.8"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -1037,14 +1037,29 @@ _t2t_handle() {
   prompt=$(_t2t_attach_file_samples "$prompt")
   local json_payload
   json_payload=$(_t2t_build_json "$prompt" "$model" "$T2T_TERMINAL_ID" "$T2T_SESSION_ID")
-  # Use always block for guaranteed tmpfile cleanup (avoids trap leakage across functions)
+  # Use always block for guaranteed tmpfile cleanup (avoids trap leakage across functions).
+  # Curl stderr stays on the terminal. Folding it into the body (`2>&1`) made
+  # a 30s timeout (exit 28) look like a non-JSON API response.
+  local curl_status=0
   {
     _t2t_curl "$api_key" -sS -X POST "$T2T_API_URL" \
       -H 'Content-Type: application/json' \
       --max-time 30 \
       --data "$json_payload" \
-      > "$tmpfile" 2>&1
+      > "$tmpfile"
+    curl_status=$?
     printf "\r%*s\r\n" ${COLUMNS:-80} " " # clear line
+
+    if (( curl_status == 28 )); then
+      print -u2 "[talk2term] The API did not answer within 30 seconds. Try again."
+      _t2t_maybe_reset_prompt
+      return 0
+    fi
+    if (( curl_status != 0 )); then
+      print -u2 "[talk2term] Failed to reach the API."
+      _t2t_maybe_reset_prompt
+      return 0
+    fi
 
     # --- HANDLE RESPONSE ---
     if ! resp=$(cat "$tmpfile"); then
