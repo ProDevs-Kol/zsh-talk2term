@@ -1286,11 +1286,9 @@ if [[ -o interactive && -o zle ]]; then
       zle reset-prompt
       return
     else
-      if (( ${+widgets[_t2t_orig_accept_line]} )); then
-        _t2t_orig_accept_line
-      else
-        zle accept-line
-      fi
+      # .accept-line is the builtin widget. Calling it directly avoids
+      # recursion and a pipeline per Enter.
+      zle .accept-line
     fi
   }
   zle -N accept-line _t2t_accept_line
