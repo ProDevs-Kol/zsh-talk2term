@@ -678,6 +678,22 @@ _t2t_has_bare_exit() {
   return 1
 }
 
+# Shorten display text at a word boundary, never mid-word.
+#
+# Args:
+#   text: Text to show.
+#   max: Maximum characters (default 600).
+#
+# Prints the text, cut at the last space before max with "..." appended.
+_t2t_clip_words() {
+  emulate -L zsh
+  local text="$1" max="${2:-600}" cut
+  (( ${#text} <= max )) && { print -r -- "$text"; return 0 }
+  cut="${text[1,max]}"
+  [[ "$cut" == *" "* ]] && cut="${cut% *}"
+  print -r -- "${cut%%[[:space:],;:]#}..."
+}
+
 # True when an API reply is a refusal or prose, not a shell command.
 #
 # Args:
@@ -1178,7 +1194,7 @@ _t2t_handle() {
   # no Execute? prompt, no destructive warning and no needs-hint.
   if _t2t_is_refusal "$command"; then
     print -P "\n%F{yellow}[talk2term] Not translated (the API refused):%f"
-    print -r -- "  $(printf '%s' "$command" | _t2t_sanitize_output | head -c 400)"
+    print -r -- "  $(_t2t_clip_words "$(printf '%s' "$command" | _t2t_sanitize_output)" 600)"
     _t2t_maybe_reset_prompt
     return 0
   fi

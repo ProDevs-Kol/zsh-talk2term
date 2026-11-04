@@ -24,4 +24,9 @@ out=$(_t2t_warn_missing_tools 'definitely-missing-tool-xyz --x' 2>&1)
 
 src=$(<"${0:A:h}/../talk2term.zsh")
 [[ "$src" != *"zle -l | grep"* ]] && ok "no pipeline in accept-line widget" || bad "zle -l | grep pipeline still present"
+long="I can't help with deleting everything. Instead, remove only temp/cache files you have reviewed, for example old build artifacts in your project folder."
+out=$(_t2t_clip_words "$long" 120)
+[[ "$out" == *"..." && "$long" == "${out%...}"* && "${long[${#${out%...}}+1]}" == " " ]] && ok "clip at word boundary: $out" || bad "clip cut mid-word: $out"
+[[ "$(_t2t_clip_words "short text" 120)" == "short text" ]] && ok "short text unchanged" || bad "short text changed"
+[[ "$src" != *'_t2t_sanitize_output | head -c 400'* ]] && ok "no byte cut on refusal" || bad "refusal still byte-cut"
 exit $fail
