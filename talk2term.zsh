@@ -678,6 +678,27 @@ _t2t_has_bare_exit() {
   return 1
 }
 
+# True when an API reply is a refusal or prose, not a shell command.
+#
+# Args:
+#   text: Normalized reply from the API.
+#
+# Returns:
+#   0 when the reply reads as a refusal sentence.
+_t2t_is_refusal() {
+  emulate -L zsh
+  setopt extended_glob
+  local t="${1##[[:space:]]#}"
+  t="${t:l}"
+  t="${t//’/'}"
+  case "$t" in
+    "i can't"*|"i cannot"*|"i can not"*|"i won't"*|"i will not"*|"i'm sorry"*|"i am sorry"*|"i'm not able"*|"i am not able"*|"i'm unable"*|"i am unable"*|"sorry"*|"unfortunately"*|"as an ai"*|"i'm afraid"*|"i must decline"*|"i refuse"*|"i do not"*|"i don't"*)
+      return 0 ;;
+  esac
+  [[ "$t" == *"i can't help"* || "$t" == *"i cannot help"* || "$t" == *"cannot assist"* || "$t" == *"can't assist"* || "$t" == *"not able to help"* ]] && return 0
+  return 1
+}
+
 # Warn when the command's main binary is not installed.
 #
 # Prints "needs X: install with …" and does not block execution.
@@ -692,6 +713,14 @@ _t2t_warn_missing_tools() {
   local bin="" i=1 w hint
   while (( i <= ${#words} )); do
     w="${words[i]}"
+    # for f in …; select x in …: the loop variable and list are not commands.
+    if [[ "$w" == (for|select|foreach) ]]; then
+      i=$((i + 1))
+      while (( i <= ${#words} )) && [[ "${words[i]}" != (do|\;|\;\;|\{) ]]; do
+        i=$((i + 1))
+      done
+      continue
+    fi
     if _t2t_is_shell_separator "$w"; then
       i=$((i + 1))
       continue
@@ -1145,6 +1174,15 @@ _t2t_handle() {
     return 0
   fi
 
+  # A refusal or prose answer is not a command. Show it as a refusal with
+  # no Execute? prompt, no destructive warning and no needs-hint.
+  if _t2t_is_refusal "$command"; then
+    print -P "\n%F{yellow}[talk2term] Not translated (the API refused):%f"
+    print -r -- "  $(printf '%s' "$command" | _t2t_sanitize_output | head -c 400)"
+    _t2t_maybe_reset_prompt
+    return 0
+  fi
+
   # --- DISPLAY COMMAND ---
   # Use print without -P for API-controlled content to prevent ZSH prompt
   # sequence injection (%F, %n, %m etc. could leak system info or mislead)
@@ -1238,7 +1276,7 @@ if [[ -o interactive && -o zle ]]; then
   zle -N _t2t_zle_widget
 
   # Save original accept-line only once
-  if ! zle -l | grep -q '^_t2t_orig_accept_line$'; then
+  if (( ! ${+widgets[_t2t_orig_accept_line]} )); then
     zle -N _t2t_orig_accept_line accept-line
   fi
 
@@ -1248,11 +1286,9 @@ if [[ -o interactive && -o zle ]]; then
       zle reset-prompt
       return
     else
-      if zle -l | grep -q '^_t2t_orig_accept_line$'; then
-        _t2t_orig_accept_line
-      else
-        zle accept-line
-      fi
+      # .accept-line is the builtin widget. Calling it directly avoids
+      # recursion and a pipeline per Enter.
+      zle .accept-line
     fi
   }
   zle -N accept-line _t2t_accept_line
