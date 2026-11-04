@@ -2,6 +2,8 @@
 
 > Use plain English in your terminal — and let AI convert it to safe, executable shell commands.
 
+![Talk2Term demo: plain English to a command, y/n prompt before running, risky request refused](docs/demo.gif)
+
 `zsh-talk2term` is a ZSH plugin for [Talk2Term](https://talk2term.prodevs.in), allowing you to type natural language prompts like:
 
 ```bash
