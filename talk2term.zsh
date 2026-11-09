@@ -953,7 +953,100 @@ _t2t_is_dangerous_command() {
     fi
   fi
 
+  # `yes |` auto-answers overwrite prompts for any command (ssh-keygen, cp -i, …).
+  [[ "$lcmd" =~ '(^|[[:space:];&|])yes[[:space:]]*\|' ]] && return 0
+
+  # ssh-keygen -f with stdin fed y/yes silently replaces an existing private key.
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])ssh-keygen[[:space:]]' \
+    && "$lcmd" =~ '(^|[^[:alnum:]_])-f([^[:alnum:]_]|$)' ]]; then
+    if [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '<<<[[:space:]]+y(es)?([[:space:]]|$)' ]] \
+      || [[ "$lcmd" =~ '<<<[[:space:]]+['\''"]y(es)?['\''"]([[:space:]]|$)' ]]; then
+      return 0
+    fi
+  fi
+
   return 1  # Not dangerous
+}
+
+# Rewrite ssh-keygen answers that auto-confirm overwrite into a no-overwrite form.
+#
+# Args:
+#   cmd: Shell command text from the API.
+#
+# Returns:
+#   Prints the rewritten command (or the original when no rewrite applies).
+#
+# "no prompts" must not mean "overwrite an existing private key". Strip
+# `yes |` / `echo y |` / `<<< y` feeders and require the key path to be absent.
+_t2t_rewrite_ssh_keygen_overwrite() {
+  emulate -L zsh
+  local cmd="$1"
+  local lcmd="${cmd:l}"
+  local keyfile=""
+  local rewritten="$cmd"
+  local fed_yes=0
+
+  [[ "$lcmd" == *"ssh-keygen"* ]] || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  if [[ "$lcmd" =~ '(^|[[:space:];&|])yes[[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '<<<[[:space:]]+y(es)?([[:space:]]|$)' ]] \
+    || [[ "$lcmd" =~ '<<<[[:space:]]+['\''"]y(es)?['\''"]([[:space:]]|$)' ]]; then
+    fed_yes=1
+  fi
+  (( fed_yes )) || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  if [[ "$cmd" =~ '(^|[[:space:]])-f[[:space:]]+"([^"]+)"' ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ "(^|[[:space:]])-f[[:space:]]+'([^']+)'" ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ '(^|[[:space:]])-f[[:space:]]+([^[:space:]]+)' ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ '(^|[[:space:]])-f"([^"]+)"' ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ "(^|[[:space:]])-f'([^']+)'" ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ '(^|[[:space:]])-f([^[:space:]]+)' ]]; then
+    keyfile="${match[2]}"
+  fi
+  [[ -n "$keyfile" ]] || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  rewritten=$(printf '%s' "$rewritten" | sed -E \
+    -e 's/(^|[[:space:];&|])yes[[:space:]]*\|[[:space:]]*/\1/g' \
+    -e 's/(^|[[:space:];&|])echo[[:space:]]+y(es)?[[:space:]]*\|[[:space:]]*/\1/g' \
+    -e "s/(^|[[:space:];&|])echo[[:space:]]+['\"]y(es)?['\"][[:space:]]*\\|[[:space:]]*/\\1/g" \
+    -e 's/(^|[[:space:];&|])printf[[:space:]]+y(es)?[[:space:]]*\|[[:space:]]*/\1/g' \
+    -e "s/(^|[[:space:];&|])printf[[:space:]]+['\"]y(es)?['\"][[:space:]]*\\|[[:space:]]*/\\1/g" \
+    -e 's/[[:space:]]*<<<[[:space:]]+y(es)?([[:space:]]|$)/\2/g' \
+    -e "s/[[:space:]]*<<<[[:space:]]+['\"]y(es)?['\"]([[:space:]]|$)/\\2/g")
+  rewritten="${rewritten#"${rewritten%%[![:space:]]*}"}"
+  rewritten="${rewritten%"${rewritten##*[![:space:]]}"}"
+  while [[ "$rewritten" == *"  "* ]]; do
+    rewritten="${rewritten//  / }"
+  done
+
+  if [[ "$rewritten" != *"[ ! -e ${keyfile} ]"* && "$rewritten" != *"[ ! -e \"${keyfile}\" ]"* ]]; then
+    rewritten="${rewritten/ssh-keygen/[ ! -e ${keyfile} ] && ssh-keygen}"
+  fi
+
+  printf '%s' "$rewritten"
+  return 0
 }
 
 # Report a find expression that combines -prune with -delete.
@@ -1199,6 +1292,16 @@ _t2t_handle() {
     return 0
   fi
 
+  # Warn on the raw answer first (yes | ssh-keygen must stay dangerous), then
+  # rewrite auto-yes ssh-keygen into a form that will not overwrite an existing key.
+  local raw_command="$command"
+  local rewritten
+  rewritten=$(_t2t_rewrite_ssh_keygen_overwrite "$command")
+  if [[ "$rewritten" != "$command" ]]; then
+    print -u2 "[talk2term] Rewrote auto-yes ssh-keygen so an existing key is not overwritten."
+    command="$rewritten"
+  fi
+
   # --- DISPLAY COMMAND ---
   # Use print without -P for API-controlled content to prevent ZSH prompt
   # sequence injection (%F, %n, %m etc. could leak system info or mislead)
@@ -1207,7 +1310,7 @@ _t2t_handle() {
 
   # Warn about potentially dangerous commands (best-effort denylist)
   _t2t_warn_missing_tools "$command"
-  if _t2t_is_dangerous_command "$command"; then
+  if _t2t_is_dangerous_command "$raw_command" || _t2t_is_dangerous_command "$command"; then
     print -P "%F{red}  WARNING: This command may be destructive. Review carefully before executing.%f"
   fi
 
