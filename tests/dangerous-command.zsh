@@ -56,6 +56,11 @@ expect_dangerous "rm -f data.json.tmp"
 expect_dangerous "rm -r -f data.json.tmp"
 expect_dangerous "docker image prune -f"
 
+# Staging-only rm -f (own .tmp / mktemp) must stay quiet — PRO-8475 minor.
+expect_safe "{ printf 'x\n'; cat nginx.conf; } > nginx.conf.tmp && cat nginx.conf.tmp > nginx.conf && rm -f nginx.conf.tmp"
+expect_safe 'tmp=$(mktemp) && curl -sS -D "$tmp" https://example.test/ -o out && rm -f "$tmp"'
+expect_safe "awk '1' cfg/ssh_config > cfg/ssh_config.tmp && cat cfg/ssh_config.tmp > cfg/ssh_config && rm -f cfg/ssh_config.tmp"
+
 # Ordinary commands, and the TERM-first stop forms, must stay quiet.
 expect_safe "ls -la"
 expect_safe "find logs -name '*.log' -print"
