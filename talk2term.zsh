@@ -956,6 +956,305 @@ _t2t_is_dangerous_command() {
   return 1  # Not dangerous
 }
 
+# Collect file names such as in.mp4, in first-seen order.
+#
+# Args:
+#   text: Prompt or shell command.
+#
+# Output:
+#   One file token per line. Names without an extension are omitted.
+_t2t_file_tokens() {
+  emulate -L zsh
+  local text="$1"
+  local -a tokens
+  local -A seen
+  local token rest="$text"
+  local MATCH MBEGIN MEND
+  while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._/-]*\.[[:alpha:]][[:alnum:]]{0,7}' ]]; do
+    token="$MATCH"
+    if [[ -z "$token" || -n "${seen[$token]}" ]]; then
+      rest="${rest[MEND+1,-1]}"
+      [[ -z "$token" ]] && break
+      continue
+    fi
+    seen[$token]=1
+    tokens+=("$token")
+    rest="${rest[MEND+1,-1]}"
+  done
+  if (( ${#tokens} )); then
+    print -r -- "${(F)tokens}"
+  fi
+}
+
+# Return 0 when a word is an article, quantifier, or other non-name.
+#
+# Args:
+#   word: One word from the user request.
+_t2t_is_target_exclusion() {
+  emulate -L zsh
+  local w="${1:l}"
+  case "$w" in
+    the|a|an|this|that|my|your|and|or|but|nor|one|ones|each|every|any|all|some|both|other|another|many|few|more|most|several|same|such|own|its|his|her|their|our|these|those|which|what|whose|file|files|folder|folders|directory|directories|dir|dirs|path|paths|name|names)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Print folder and file names that the request named as targets.
+#
+# A token counts only when it sits next to folder/directory/dir, follows
+# of/called/named, or contains a dot. Ordinary words are not scanned.
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#
+# Output:
+#   One name per line.
+_t2t_prompt_target_names() {
+  emulate -L zsh
+  local prompt="$1"
+  local -a tokens
+  local -A seen
+  local word rest token
+  local MATCH MBEGIN MEND
+
+  rest="$prompt"
+  while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._-]*[[:space:]]+(folders?|directories|directory|dirs?)' ]]; do
+    word="${MATCH%%[[:space:]]*}"
+    if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
+      seen[$word]=1
+      tokens+=("$word")
+    fi
+    rest="${rest[MEND+1,-1]}"
+  done
+
+  rest="$prompt"
+  while [[ -n "$rest" && "$rest" =~ '(folders?|directories|directory|dirs?)[[:space:]]+[[:alnum:]][[:alnum:]._-]*' ]]; do
+    word="${MATCH##*[[:space:]]}"
+    if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
+      seen[$word]=1
+      tokens+=("$word")
+    fi
+    rest="${rest[MEND+1,-1]}"
+  done
+
+  rest="$prompt"
+  while [[ -n "$rest" && "$rest" =~ '(of|called|named)[[:space:]]+[[:alnum:]][[:alnum:]._-]*' ]]; do
+    word="${MATCH##*[[:space:]]}"
+    if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
+      seen[$word]=1
+      tokens+=("$word")
+    fi
+    rest="${rest[MEND+1,-1]}"
+  done
+
+  local raw
+  raw=$(_t2t_file_tokens "$prompt")
+  if [[ -n "$raw" ]]; then
+    for word in "${(f)raw}"; do
+      if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
+        seen[$word]=1
+        tokens+=("$word")
+      fi
+    done
+  fi
+
+  if (( ${#tokens} )); then
+    print -r -- "${(F)tokens}"
+  fi
+}
+
+# Return 0 when the command uses a name as its own path token.
+#
+# "ssh" inside ~/.ssh is not a use of the name ssh. Regex metacharacters in
+# the token are escaped before the match.
+#
+# Args:
+#   command: Shell command.
+#   token: File or folder name from the request.
+_t2t_command_has_token() {
+  emulate -L zsh
+  local command="$1"
+  local token="$2"
+  local escaped
+  # Path tokens are alphanumeric with . _ - . Escape dots so they are
+  # literal in the regex, matching commandHasToken on the server.
+  [[ "$token" == *[!A-Za-z0-9._-]* ]] && return 1
+  escaped="${token//./\\.}"
+  [[ "$command" =~ "(^|[^[:alnum:]_.-])${escaped}([^[:alnum:]_.-]|$)" ]]
+}
+
+# Return 0 when the request already names this well-known path.
+#
+# Args:
+#   prompt: User request with $HOME normalized to ~.
+#   command_path: Path taken from the command.
+_t2t_prompt_names_well_known_path() {
+  emulate -L zsh
+  local prompt="$1"
+  local path="$2"
+  local parent segment bare
+
+  parent="$path"
+  while [[ "$parent" == */* ]]; do
+    [[ "$prompt" == *"$parent"* ]] && return 0
+    parent="${parent%/*}"
+    [[ "$parent" == "~" || -z "$parent" ]] && break
+  done
+  [[ "$prompt" == *"$path"* ]] && return 0
+
+  segment="${path##*/}"
+  bare="${segment#.}"
+  if (( ${#bare} > 3 )) && _t2t_command_has_token "$prompt" "$bare"; then
+    return 0
+  fi
+  return 1
+}
+
+# Print well-known paths in a command that the request did not name.
+#
+# Child paths collapse to the shortest path. Daily test 8 (29 Oct 2026):
+# the model wrote ~/.ssh for the sshdir folder.
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#   command: Shell command returned for that request.
+#
+# Output:
+#   One path per line. Prints nothing when every such path was named.
+_t2t_invented_well_known_paths() {
+  emulate -L zsh
+  local prompt="${1//\$HOME/~}"
+  local command="${2//\$HOME/~}"
+  local -a found kept words
+  local -A seen
+  local path keep item other word
+
+  words=("${(z)command}")
+  for word in "${words[@]}"; do
+    path="${word//\$HOME/~}"
+    # Quote the tilde so case/glob does not expand it to $HOME.
+    case "$path" in
+      (\~/.[[:alnum:]_-]*|\~/Downloads*|\~/Documents*|\~/Desktop*|\~/Library*|/etc|/etc/*|/var/www|/var/www*)
+        ;;
+      *)
+        continue
+        ;;
+    esac
+    path="${path%%[;,)]#}"
+    [[ -n "$path" && -z "${seen[$path]}" ]] || continue
+    seen[$path]=1
+    if ! _t2t_prompt_names_well_known_path "$prompt" "$path"; then
+      found+=("$path")
+    fi
+  done
+
+  for item in "${found[@]}"; do
+    keep=1
+    for other in "${found[@]}"; do
+      [[ "$other" != "$item" && "$item" == "$other"/* ]] && keep=0
+    done
+    (( keep )) && kept+=("$item")
+  done
+
+  if (( ${#kept} )); then
+    print -r -- "${(F)kept}"
+  fi
+}
+
+# Warn when a command drops a named file or uses a placeholder path.
+#
+# Daily tests 14 and 17 (28 Oct 2026), test 8 (29 Oct 2026), and test 9
+# (10 Nov 2026): the model swapped a named path. Show this text before Execute?.
+#
+# Args:
+#   prompt: User request, without the t2t: prefix.
+#   command: Shell command returned for that request.
+#
+# Output:
+#   Warning text when the names need review. Prints nothing when they match.
+_t2t_named_target_warning() {
+  emulate -L zsh
+  local prompt="$1"
+  local command="$2"
+  local -a warnings prompt_names command_names dropped invented
+  local -a dropped_here invented_missing
+  local -A prompt_set command_set
+  local name lcmd="${command:l}"
+
+  if [[ "$lcmd" == *"/path/to/"* || "$lcmd" == *"/path/to "* || "$lcmd" == */path/to || "$lcmd" =~ '(^|[^[:alnum:]_-])(your_file|your_folder|your-file|<file>|<folder>|<path>)([^[:alnum:]_-]|$)' ]]; then
+    warnings+=("The command uses a placeholder path. Use the file or folder name from the request. Do not use /path/to/, your_file, or similar placeholders.")
+  fi
+
+  local raw
+  raw=$(_t2t_file_tokens "$prompt")
+  if [[ -n "$raw" ]]; then
+    prompt_names=("${(f)raw}")
+  fi
+  raw=$(_t2t_file_tokens "$command")
+  if [[ -n "$raw" ]]; then
+    command_names=("${(f)raw}")
+  fi
+  for name in "${prompt_names[@]}"; do
+    prompt_set[$name]=1
+  done
+  for name in "${command_names[@]}"; do
+    command_set[$name]=1
+  done
+  for name in "${prompt_names[@]}"; do
+    [[ -n "${command_set[$name]}" ]] || dropped+=("$name")
+  done
+  for name in "${command_names[@]}"; do
+    [[ -n "${prompt_set[$name]}" ]] || invented+=("$name")
+  done
+
+  if (( ${#dropped} && ${#invented} )); then
+    for name in "${dropped[@]}"; do
+      [[ -e "$name" ]] && dropped_here+=("$name")
+    done
+    for name in "${invented[@]}"; do
+      [[ -e "$name" ]] || invented_missing+=("$name")
+    done
+    if (( ${#dropped_here} && ${#invented_missing} )); then
+      warnings+=("${(j:, :)dropped_here} is in this directory, but the command uses ${(j:, :)invented_missing}, which is not here.")
+    else
+      warnings+=("The command does not use ${(j:, :)dropped} from the request. It uses ${(j:, :)invented} instead.")
+    fi
+  fi
+
+  local -a targets missing_names invented_paths missing_here
+  raw=$(_t2t_prompt_target_names "$prompt")
+  if [[ -n "$raw" ]]; then
+    targets=("${(f)raw}")
+    for name in "${targets[@]}"; do
+      _t2t_command_has_token "$command" "$name" || missing_names+=("$name")
+    done
+  fi
+  if (( ${#missing_names} )); then
+    for name in "${missing_names[@]}"; do
+      [[ -e "$name" ]] && missing_here+=("$name")
+    done
+    if (( ${#missing_here} )); then
+      warnings+=("${(j:, :)missing_here} is in this directory, but the command does not use it.")
+    else
+      warnings+=("The command does not use ${(j:, :)missing_names} from the request.")
+    fi
+  fi
+
+  raw=$(_t2t_invented_well_known_paths "$prompt" "$command")
+  if [[ -n "$raw" ]]; then
+    invented_paths=("${(f)raw}")
+  fi
+  if (( ${#invented_paths} && ${#targets} )); then
+    warnings+=("The command uses ${(j:, :)invented_paths}, which the request did not name.")
+  fi
+
+  if (( ${#warnings} )); then
+    print -r -- "${(j: :)warnings}"
+  fi
+}
+
 # Report a find expression that combines -prune with -delete.
 #
 # Args:
@@ -1079,6 +1378,7 @@ _t2t_handle() {
   }
 
   printf "[talk2term] Working...\r"
+  local user_prompt="$prompt"
   prompt=$(_t2t_attach_file_samples "$prompt")
   local json_payload
   json_payload=$(_t2t_build_json "$prompt" "$model" "$T2T_TERMINAL_ID" "$T2T_SESSION_ID")
@@ -1234,6 +1534,19 @@ _t2t_handle() {
     fi
     _t2t_maybe_reset_prompt
     return 0
+  fi
+
+  # Warn when the model swapped a named file or folder. Prefer the local
+  # check; fall back to the server name_warning when this build has nothing.
+  local name_warning
+  name_warning=$(_t2t_named_target_warning "$user_prompt" "$command")
+  if [[ -z "$name_warning" ]]; then
+    name_warning=$(printf '%s' "$resp" | jq -r '.name_warning // empty')
+    [[ "$name_warning" == "null" ]] && name_warning=""
+  fi
+  if [[ -n "$name_warning" ]]; then
+    print -P "%F{yellow}  Name check:%f"
+    print -r -- "  $name_warning"
   fi
 
   print -Pn "Execute? (y/n): "
