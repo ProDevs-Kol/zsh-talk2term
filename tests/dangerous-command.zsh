@@ -368,4 +368,49 @@ unset -f curl
 [[ "$timeout_out" != *"Raw (truncated)"* ]] || fail "timeout stderr was treated as the body: $timeout_out"
 [[ "$timeout_out" != *"not JSON"* ]] || fail "timeout was parsed as a bad JSON body: $timeout_out"
 
-print "ok: destructive warning, prune/delete refusal, file sample, and shell safety"
+# Named-target warnings (PRO-8297 / daily tests 8, 9, 14, 17).
+expect_name_warn() {
+  local prompt="$1"
+  local command="$2"
+  local needle="$3"
+  local warning
+  warning=$(_t2t_named_target_warning "$prompt" "$command")
+  [[ -n "$warning" ]] || fail "expected a name warning for: $command"
+  [[ "$warning" == *"$needle"* ]] || fail "expected warning to contain $needle: $warning"
+}
+
+expect_name_silent() {
+  local prompt="$1"
+  local command="$2"
+  local warning
+  warning=$(_t2t_named_target_warning "$prompt" "$command")
+  [[ -z "$warning" ]] || fail "expected no name warning, got: $warning"
+}
+
+test17_prompt='cut in.mp4 from 5 seconds to 12 seconds into clip.mp4 without re-encoding'
+test14_prompt='give user nobody read access to the site folder and everything in it, including files created there later, without changing the owner'
+test08_prompt='fix the permissions of sshdir and the files in it so ssh stops complaining: private key, public key, authorized_keys and config'
+test08_swapped="chmod 700 ~/.ssh && chmod 600 ~/.ssh/config ~/.ssh/authorized_keys && find ~/.ssh -maxdepth 1 -type f ! -name '*.pub' -exec chmod 600 {} +"
+test08_kept="chmod 700 sshdir && chmod 600 sshdir/config sshdir/authorized_keys && find sshdir -maxdepth 1 -type f ! -name '*.pub' -exec chmod 600 {} +"
+test08_additive='chmod 700 sshdir && chmod 600 sshdir/config sshdir/authorized_keys && chmod 700 ~/.ssh'
+test09_prompt='under the folder tree list every file name that exists in more than one directory, together with all the paths where it appears; names may contain spaces'
+
+expect_name_warn "$test17_prompt" 'ffmpeg -ss 5 -i input.mp4 -t 7 -c copy clip.mp4' 'in.mp4'
+expect_name_silent "$test17_prompt" 'ffmpeg -ss 5 -i in.mp4 -t 7 -c copy clip.mp4'
+expect_name_warn "$test14_prompt" 'setfacl -R -m u:nobody:rX /path/to/site && find /path/to/site -type d -exec setfacl -m d:u:nobody:rX {} +' '/path/to/'
+expect_name_silent "$test14_prompt" 'setfacl -R -m u:nobody:rX site && find site -type d -exec setfacl -m d:u:nobody:rX {} +'
+expect_name_warn "$test08_prompt" "$test08_swapped" '~/.ssh'
+expect_name_warn "$test08_prompt" "$test08_swapped" 'sshdir'
+expect_name_silent "$test08_prompt" "$test08_kept"
+expect_name_warn "$test08_prompt" "$test08_additive" '~/.ssh'
+expect_name_silent 'fix my ssh keys' 'chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_rsa'
+expect_name_silent 'update the package list' 'sudo cp /etc/apt/sources.list /etc/apt/sources.list.bak'
+warn=$(_t2t_named_target_warning 'the folder ssh_keys holds a private key' 'chmod 700 ~/.ssh')
+[[ "$warn" == *ssh_keys* && "$warn" == *~/.ssh* ]] || fail "ssh_keys warning missing names: $warn"
+[[ "$warn" != *"does not use the "* ]] || fail "ssh_keys warning listed the: $warn"
+expect_name_silent 'make a copy of reports and put it in ~/Downloads' 'cp -R reports ~/Downloads'
+expect_name_silent 'make a copy of reports and put it in Downloads' 'cp -R reports ~/Downloads'
+expect_name_warn "$test09_prompt" 'python3 -c '"'"'import os; [print(p) for p,_,fs in os.walk(".") for f in fs]'"'"'' 'tree'
+expect_name_silent "$test09_prompt" 'find tree -type f -print'
+
+print "ok: destructive warning, prune/delete refusal, file sample, shell safety, and named-target warnings"
