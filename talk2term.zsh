@@ -625,7 +625,8 @@ _t2t_is_crontab_line() {
 # run in a subshell.
 #
 # cd, export, source, and job-control builtins only stick when eval
-# runs in the user's shell. A bare assignment is the same.
+# runs in the user's shell. Top-level VAR=value is not sticky here;
+# those run in a subshell so they cannot clobber the user's session.
 #
 # Args:
 #   cmd: Shell command text returned by the API.
@@ -635,7 +636,7 @@ _t2t_is_crontab_line() {
 _t2t_needs_current_shell() {
   local cmd="$1"
   local -a words
-  local w saw_command=0
+  local w
   words=("${(z)cmd}")
   for w in "${words[@]}"; do
     case "$w" in
@@ -647,18 +648,40 @@ _t2t_needs_current_shell() {
         ;;
     esac
   done
-  for w in "${words[@]}"; do
-    _t2t_is_shell_separator "$w" && continue
+  return 1
+}
+
+# True when the command has a top-level VAR=value assignment.
+#
+# Assignments after export/typeset/declare/local/readonly are skipped:
+# those must stick in the interactive shell when the user asked for them.
+#
+# Args:
+#   cmd: Shell command text returned by the API.
+#
+# Returns:
+#   0 when a bare assignment word is present, 1 otherwise.
+_t2t_has_top_level_assignment() {
+  local -a words
+  local w i=1
+  words=("${(z)1}")
+  while (( i <= ${#words} )); do
+    w="${words[i]}"
     case "$w" in
-      '{'|'}'|'('|')') continue ;;
+      export|typeset|declare|local|readonly|integer|float)
+        i=$((i + 1))
+        while (( i <= ${#words} )) && ! _t2t_is_shell_separator "${words[i]}"; do
+          i=$((i + 1))
+        done
+        continue
+        ;;
     esac
-    if [[ "$w" == [[:alpha:]_]*=* ]]; then
-      continue
+    if [[ "$w" == [[:alpha:]_][[:alnum:]_]#=* ]]; then
+      return 0
     fi
-    saw_command=1
-    break
+    i=$((i + 1))
   done
-  (( saw_command == 0 )) && [[ "$cmd" == *=* ]]
+  return 1
 }
 
 # True when exit is a command word, not text inside a quoted argument.
@@ -960,6 +983,22 @@ _t2t_is_dangerous_command() {
     fi
   fi
 
+  # `yes |` auto-answers overwrite prompts for any command (ssh-keygen, cp -i, …).
+  [[ "$lcmd" =~ '(^|[[:space:];&|])yes[[:space:]]*\|' ]] && return 0
+
+  # ssh-keygen -f with stdin fed y/yes silently replaces an existing private key.
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])ssh-keygen[[:space:]]' \
+    && "$lcmd" =~ '(^|[^[:alnum:]_])-f([^[:alnum:]_]|$)' ]]; then
+    if [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+      || [[ "$lcmd" =~ '<<<[[:space:]]+y(es)?([[:space:]]|$)' ]] \
+      || [[ "$lcmd" =~ '<<<[[:space:]]+['\''"]y(es)?['\''"]([[:space:]]|$)' ]]; then
+      return 0
+    fi
+  fi
+
   return 1  # Not dangerous
 }
 
@@ -1102,6 +1141,94 @@ _t2t_rewrite_ssh_config_host_order() {
 #
 # -delete implies -depth, and -depth makes -prune a no-op, so the excluded
 # path is deleted. Callers must not execute the command.
+
+# Rewrite ssh-keygen answers that auto-confirm overwrite into a no-overwrite form.
+#
+# Args:
+#   cmd: Shell command text from the API.
+#
+# Returns:
+#   Prints the rewritten command (or the original when no rewrite applies).
+#
+# "no prompts" must not mean "overwrite an existing private key". Strip
+# `yes |` / `echo y |` / `<<< y` feeders and require the key path to be absent.
+_t2t_rewrite_ssh_keygen_overwrite() {
+  emulate -L zsh
+  local cmd="$1"
+  local lcmd="${cmd:l}"
+  local keyfile=""
+  local rewritten="$cmd"
+  local fed_yes=0
+
+  [[ "$lcmd" == *"ssh-keygen"* ]] || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  if [[ "$lcmd" =~ '(^|[[:space:];&|])yes[[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])echo[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+y(es)?[[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '(^|[[:space:];&|])printf[[:space:]]+['\''"]y(es)?['\''"][[:space:]]*\|' ]] \
+    || [[ "$lcmd" =~ '<<<[[:space:]]+y(es)?([[:space:]]|$)' ]] \
+    || [[ "$lcmd" =~ '<<<[[:space:]]+['\''"]y(es)?['\''"]([[:space:]]|$)' ]]; then
+    fed_yes=1
+  fi
+  (( fed_yes )) || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  if [[ "$cmd" =~ '(^|[[:space:]])-f[[:space:]]+"([^"]+)"' ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ "(^|[[:space:]])-f[[:space:]]+'([^']+)'" ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ '(^|[[:space:]])-f[[:space:]]+([^[:space:]]+)' ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ '(^|[[:space:]])-f"([^"]+)"' ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ "(^|[[:space:]])-f'([^']+)'" ]]; then
+    keyfile="${match[2]}"
+  elif [[ "$cmd" =~ '(^|[[:space:]])-f([^[:space:]]+)' ]]; then
+    keyfile="${match[2]}"
+  fi
+  [[ -n "$keyfile" ]] || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  rewritten=$(printf '%s' "$rewritten" | sed -E \
+    -e 's/(^|[[:space:];&|])yes[[:space:]]*\|[[:space:]]*/\1/g' \
+    -e 's/(^|[[:space:];&|])echo[[:space:]]+y(es)?[[:space:]]*\|[[:space:]]*/\1/g' \
+    -e "s/(^|[[:space:];&|])echo[[:space:]]+['\"]y(es)?['\"][[:space:]]*\\|[[:space:]]*/\\1/g" \
+    -e 's/(^|[[:space:];&|])printf[[:space:]]+y(es)?[[:space:]]*\|[[:space:]]*/\1/g' \
+    -e "s/(^|[[:space:];&|])printf[[:space:]]+['\"]y(es)?['\"][[:space:]]*\\|[[:space:]]*/\\1/g" \
+    -e 's/[[:space:]]*<<<[[:space:]]+y(es)?([[:space:]]|$)/\2/g' \
+    -e "s/[[:space:]]*<<<[[:space:]]+['\"]y(es)?['\"]([[:space:]]|$)/\\2/g")
+  rewritten="${rewritten#"${rewritten%%[![:space:]]*}"}"
+  rewritten="${rewritten%"${rewritten##*[![:space:]]}"}"
+  while [[ "$rewritten" == *"  "* ]]; do
+    rewritten="${rewritten//  / }"
+  done
+
+  if [[ "$rewritten" != *"[ ! -e ${keyfile} ]"* && "$rewritten" != *"[ ! -e \"${keyfile}\" ]"* ]]; then
+    rewritten="${rewritten/ssh-keygen/[ ! -e ${keyfile} ] && ssh-keygen}"
+  fi
+
+  printf '%s' "$rewritten"
+  return 0
+}
+
+# Report a find expression that combines -prune with -delete.
+#
+# Args:
+#   cmd: Shell command text.
+#
+# Returns:
+#   0 when both -prune and -delete are present, 1 otherwise.
+#
+# -delete implies -depth, and -depth makes -prune a no-op, so the excluded
+# path is deleted. Callers must not execute the command.
 _t2t_find_prune_delete_conflict() {
   local lcmd="${1:l}"
   [[ "$lcmd" == *"-prune"* && "$lcmd" == *"-delete"* ]]
@@ -1117,7 +1244,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.14"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.15"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -1335,9 +1462,17 @@ _t2t_handle() {
     return 0
   fi
 
+  # Warn on the raw answer first (yes | ssh-keygen must stay dangerous), then
+  # rewrite auto-yes ssh-keygen into a form that will not overwrite an existing key.
   # ssh first-match: a Host-specific ForwardAgent block appended after
   # Host * never takes effect. Rewrite to prepend + cat-over before display.
+  local raw_command="$command"
   local rewritten
+  rewritten=$(_t2t_rewrite_ssh_keygen_overwrite "$command")
+  if [[ "$rewritten" != "$command" ]]; then
+    print -u2 "[talk2term] Rewrote auto-yes ssh-keygen so an existing key is not overwritten."
+    command="$rewritten"
+  fi
   rewritten=$(_t2t_rewrite_ssh_config_host_order "$command")
   if [[ "$rewritten" != "$command" ]]; then
     print -u2 "[talk2term] Rewrote ssh_config Host block to come before Host * (ssh first-match)."
@@ -1352,7 +1487,7 @@ _t2t_handle() {
 
   # Warn about potentially dangerous commands (best-effort denylist)
   _t2t_warn_missing_tools "$command"
-  if _t2t_is_dangerous_command "$command"; then
+  if _t2t_is_dangerous_command "$raw_command" || _t2t_is_dangerous_command "$command"; then
     print -P "%F{red}  WARNING: This command may be destructive. Review carefully before executing.%f"
   fi
 
@@ -1398,11 +1533,12 @@ _t2t_handle() {
   return 0
 }
 
-# Run an API command without letting exit close the user's terminal.
+# Run an API command without letting exit or temp vars touch the shell.
 #
-# Commands that must change the interactive shell (cd, export, source)
-# still eval there, unless they also call exit. Every other command
-# runs in a subshell, so exit and temporary variables stay inside it.
+# Top-level VAR=value and bare exit always run in a subshell, even when
+# the command also has cd/export. Sticky builtins alone still eval in
+# the interactive shell so cd and export keep working. No emulate -L
+# here: the subshell must keep the user's options (e.g. nonomatch).
 #
 # Args:
 #   command: Shell command text returned by the API.
@@ -1410,16 +1546,23 @@ _t2t_handle() {
 # Returns:
 #   The exit status of the command.
 _t2t_run_returned_command() {
-  emulate -L zsh
   local command="$1"
-  if _t2t_needs_current_shell "$command" && ! _t2t_has_bare_exit "$command"; then
-    eval "$command"
+  local use_subshell=0
+  if _t2t_has_bare_exit "$command" || _t2t_has_top_level_assignment "$command"; then
+    use_subshell=1
+  elif ! _t2t_needs_current_shell "$command"; then
+    use_subshell=1
+  fi
+  if (( use_subshell )); then
+    if _t2t_has_bare_exit "$command"; then
+      print -u2 "[talk2term] Running in a subshell so exit cannot close this terminal."
+    elif _t2t_has_top_level_assignment "$command"; then
+      print -u2 "[talk2term] Running in a subshell so assignments do not change this shell."
+    fi
+    ( eval "$command" )
     return
   fi
-  if _t2t_has_bare_exit "$command"; then
-    print -u2 "[talk2term] Running in a subshell so exit cannot close this terminal."
-  fi
-  ( eval "$command" )
+  eval "$command"
 }
 
 # --- ZLE WIDGET & KEYBINDING ---

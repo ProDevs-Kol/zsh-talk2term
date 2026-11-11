@@ -26,15 +26,15 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 ### Pinned installer (recommended)
 
-Review the script, check the checksum, then run it. Tag: `v1.2.14`.
+Review the script, check the checksum, then run it. Tag: `v1.2.15`.
 
-- Script: [install.sh at v1.2.14](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.14/install.sh)
-- sha256: `118ddf91df450cbded225b00f906cb61d5a74e91e8ec3a0181fc9dd2a7728da1`
+- Script: [install.sh at v1.2.15](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.15/install.sh)
+- sha256: `7e24dcf487a171d7695c5145b1d8eb41d7819b8fecfa156807651aba4b76d5f6`
 
 ```sh
-curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.14/install.sh
-echo "118ddf91df450cbded225b00f906cb61d5a74e91e8ec3a0181fc9dd2a7728da1  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "118ddf91df450cbded225b00f906cb61d5a74e91e8ec3a0181fc9dd2a7728da1  /tmp/talk2term-install.sh" | sha256sum -c -
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.15/install.sh
+echo "7e24dcf487a171d7695c5145b1d8eb41d7819b8fecfa156807651aba4b76d5f6  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "7e24dcf487a171d7695c5145b1d8eb41d7819b8fecfa156807651aba4b76d5f6  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 ```
 
@@ -69,13 +69,13 @@ If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 1. **Clone the plugin**
 
 ```bash
-git clone --depth 1 --branch v1.2.14 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.15 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
 No Oh My Zsh:
 
 ```bash
-git clone --depth 1 --branch v1.2.14 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.15 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
 ```
 

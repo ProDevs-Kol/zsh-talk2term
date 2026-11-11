@@ -55,6 +55,9 @@ expect_dangerous "git branch -D feature-x"
 expect_dangerous "rm -f data.json.tmp"
 expect_dangerous "rm -r -f data.json.tmp"
 expect_dangerous "docker image prune -f"
+expect_dangerous "yes | ssh-keygen -f k"
+expect_dangerous "ssh-keygen -f k <<< y"
+expect_dangerous "echo y | ssh-keygen -f k"
 
 # Staging-only rm -f (own .tmp / mktemp) must stay quiet — PRO-8475 minor.
 expect_safe "{ printf 'x\n'; cat nginx.conf; } > nginx.conf.tmp && cat nginx.conf.tmp > nginx.conf && rm -f nginx.conf.tmp"
@@ -82,6 +85,8 @@ expect_safe "git checkout main"
 expect_safe "git branch -d feature-x"
 expect_safe "rm data.json.tmp"
 expect_safe "docker image prune"
+expect_safe "ssh-keygen -t ed25519 -f k -N ''"
+expect_safe "mkdir -p keys && [ ! -e keys/deploy_ed25519 ] && ssh-keygen -t ed25519 -f keys/deploy_ed25519 -N ''"
 
 bad="find cache -path cache/pinned -prune -o -type f -name '*.tmp' -mtime +7 -delete"
 _t2t_find_prune_delete_conflict "$bad" || fail "prune+delete was not refused"
@@ -342,6 +347,31 @@ cd_out=$(
 _t2t_has_bare_exit 'echo "exit 1"' && fail "quoted exit was treated as the builtin"
 _t2t_has_bare_exit 'echo exit-now' && fail "exit-now was treated as the builtin"
 _t2t_has_bare_exit 'false || exit 1' || fail "bare exit was missed"
+
+# 10 Nov 2026: top-level assignments must not leak into the user shell.
+# Daily test: d=2025-12-31; printf … left d set under naive eval.
+assign_out=$(
+  setopt no_err_exit
+  unset t2t_iso_d
+  _t2t_run_returned_command 't2t_iso_d=2025-12-31; print -r -- $t2t_iso_d' 2>&1 || true
+  print "LEAK_D=${t2t_iso_d-unset}"
+) || true
+[[ "$assign_out" == *2025-12-31* ]] || fail "assignment command produced no output: $assign_out"
+[[ "$assign_out" == *LEAK_D=unset* ]] || fail "top-level assignment leaked: $assign_out"
+[[ "$assign_out" == *"assignments do not change this shell"* ]] || fail "assignment ran without the subshell note: $assign_out"
+_t2t_has_top_level_assignment 't2t_iso_d=2025-12-31; print x' || fail "top-level assignment was missed"
+_t2t_has_top_level_assignment 'export T2T_EXPORT_PROBE=1' && fail "export assignment was treated as top-level"
+unset T2T_EXPORT_PROBE
+_t2t_run_returned_command 'export T2T_EXPORT_PROBE=ok'
+[[ "${T2T_EXPORT_PROBE-}" == ok ]] || fail "export did not stick in the current shell"
+unset T2T_EXPORT_PROBE
+
+# 1 Nov 2026: keep the interactive shell's options (no emulate -L).
+setopt nonomatch
+nonomatch_out=$(_t2t_run_returned_command 'print *.no-such-t2t-xyz' 2>&1) || true
+[[ "$nonomatch_out" == *'*.no-such-t2t-xyz'* ]] || fail "nonomatch literal was lost: $nonomatch_out"
+[[ "$nonomatch_out" != *'no matches found'* ]] || fail "emulate reset nonomatch: $nonomatch_out"
+unsetopt nonomatch
 
 # 1 Nov 2026: curl exit 28 must not be parsed as the API body.
 # The convert call used to redirect stderr into the body file, so the
