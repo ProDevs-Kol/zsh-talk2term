@@ -55,6 +55,9 @@ expect_dangerous "git branch -D feature-x"
 expect_dangerous "rm -f data.json.tmp"
 expect_dangerous "rm -r -f data.json.tmp"
 expect_dangerous "docker image prune -f"
+expect_dangerous "yes | ssh-keygen -f k"
+expect_dangerous "ssh-keygen -f k <<< y"
+expect_dangerous "echo y | ssh-keygen -f k"
 
 # Ordinary commands, and the TERM-first stop forms, must stay quiet.
 expect_safe "ls -la"
@@ -75,6 +78,8 @@ expect_safe "git checkout main"
 expect_safe "git branch -d feature-x"
 expect_safe "rm data.json.tmp"
 expect_safe "docker image prune"
+expect_safe "ssh-keygen -t ed25519 -f k -N ''"
+expect_safe "mkdir -p keys && [ ! -e keys/deploy_ed25519 ] && ssh-keygen -t ed25519 -f keys/deploy_ed25519 -N ''"
 
 bad="find cache -path cache/pinned -prune -o -type f -name '*.tmp' -mtime +7 -delete"
 _t2t_find_prune_delete_conflict "$bad" || fail "prune+delete was not refused"
