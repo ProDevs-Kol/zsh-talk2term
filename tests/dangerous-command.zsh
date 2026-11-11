@@ -60,6 +60,8 @@ expect_dangerous "docker image prune -f"
 expect_safe "{ printf 'x\n'; cat nginx.conf; } > nginx.conf.tmp && cat nginx.conf.tmp > nginx.conf && rm -f nginx.conf.tmp"
 expect_safe 'tmp=$(mktemp) && curl -sS -D "$tmp" https://example.test/ -o out && rm -f "$tmp"'
 expect_safe "awk '1' cfg/ssh_config > cfg/ssh_config.tmp && cat cfg/ssh_config.tmp > cfg/ssh_config && rm -f cfg/ssh_config.tmp"
+# 11 Nov 2026 daily rephrase: mktemp var `t` + rm -f "$t" (cat-over ssh_config).
+expect_safe 'f=cfg/ssh_config; t=$(mktemp) && { printf "Host build.example.test\n    User deploy\n    Port 2222\n\n"; cat "$f"; } > "$t" && cat "$t" > "$f" && rm -f "$t"'
 
 # Ordinary commands, and the TERM-first stop forms, must stay quiet.
 expect_safe "ls -la"
