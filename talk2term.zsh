@@ -948,7 +948,14 @@ _t2t_is_dangerous_command() {
   [[ "$lcmd" =~ 'git[[:space:]]+push([^;&|]*[[:space:]])-f([^[:alnum:]_]|$)' ]] && return 0
 
   # rm -f deletes without a prompt. -rf and -fr are already matched above.
-  [[ "$lcmd" =~ '(^|[^[:alnum:]_])rm[[:space:]](.*[[:space:]])?-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]] && return 0
+  # Skip when every rm -f only cleans this command's own staging temp
+  # (mktemp var or a .tmp path written earlier via > / >>). Crying wolf on
+  # safe rewrite pipelines trains users to ignore real warnings.
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])rm[[:space:]](.*[[:space:]])?-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]]; then
+    if ! _t2t_rm_f_only_self_temps "$cmd"; then
+      return 0
+    fi
+  fi
 
   # git clean -f / -fd / -fdx removes untracked files. -n is a dry run.
   if [[ "$lcmd" =~ '(^|[^[:alnum:]_])git[[:space:]]+clean[[:space:]]' ]]; then
@@ -994,6 +1001,146 @@ _t2t_is_dangerous_command() {
 
   return 1  # Not dangerous
 }
+
+# True when every `rm -f` in the command only deletes this command's own
+# staging temp (a `.tmp` path written earlier via `>`/`>>`, or a `$var`
+# assigned from `mktemp`).
+#
+# Args:
+#   cmd: Shell command text from the API.
+#
+# Returns:
+#   0 when rm -f targets are only self-temps, 1 when any other rm -f remains.
+_t2t_rm_f_only_self_temps() {
+  emulate -L zsh
+  setopt extended_glob
+  local cmd="$1"
+  local work="$cmd"
+  local -a temps=()
+  local var path chunk
+
+  # mktemp assignments: tmp=$(mktemp …) / tmp=`mktemp …`
+  local rest="$cmd"
+  while [[ "$rest" =~ '([A-Za-z_][A-Za-z0-9_]*)=\$\(mktemp[^)]*\)' ]]; do
+    var="${match[1]}"
+    temps+=("\$${var}" "\"\$${var}\"" "'\$${var}'")
+    rest="${rest#*${match[1]}=}"
+  done
+  rest="$cmd"
+  while [[ "$rest" =~ '([A-Za-z_][A-Za-z0-9_]*)=`mktemp[^`]*`' ]]; do
+    var="${match[1]}"
+    temps+=("\$${var}" "\"\$${var}\"" "'\$${var}'")
+    rest="${rest#*${match[1]}=}"
+  done
+
+  # Redirect targets ending in .tmp (quoted or bare).
+  rest="$cmd"
+  while [[ "$rest" =~ '(>>?[[:space:]]*)(\"([^\"]+\.tmp)\"|'\''([^'\'']+\.tmp)'\''|([^[:space:]]+\.tmp))' ]]; do
+    path="${match[3]:-${match[4]:-${match[5]}}}"
+    [[ -n "$path" ]] && temps+=("$path" "\"$path\"" "'$path'")
+    rest="${rest#*${match[1]}}"
+  done
+
+  (( ${#temps} )) || return 1
+
+  # Drop self-temp rm -f invocations; anything left still counts as dangerous.
+  for path in "${temps[@]}"; do
+    [[ -z "$path" ]] && continue
+    work=${work//rm -f -- ${path}/}
+    work=${work//rm -f ${path}/}
+    work=${work//rm -rf ${path}/}
+    work=${work//rm -fr ${path}/}
+  done
+
+  local lwork="${work:l}"
+  if [[ "$lwork" =~ '(^|[^[:alnum:]_])rm[[:space:]](.*[[:space:]])?-[[:alnum:]]*f[[:alnum:]]*([^[:alnum:]_]|$)' ]]; then
+    return 1
+  fi
+  return 0
+}
+
+# Rewrite ssh_config answers that append a host-specific block after `Host *`.
+#
+# Args:
+#   cmd: Shell command text from the API.
+#
+# Returns:
+#   Prints the rewritten command (or the original when no rewrite applies).
+#
+# OpenSSH keeps the first obtained value per option. A `Host jump…`
+# block appended after `Host *` / `Match all` never overrides
+# `ForwardAgent no`. Prefer prepend + cat-over so mode/inode stay intact
+# (`mv` of a umask-created `.tmp` can make ssh refuse the file).
+_t2t_rewrite_ssh_config_host_order() {
+  emulate -L zsh
+  setopt extended_glob
+  local cmd="$1"
+  local lcmd="${cmd:l}"
+  local host="" cfg="" fa="yes"
+
+  [[ "$lcmd" == *"forwardagent"* ]] || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  # Already a prepend form — leave alone.
+  if [[ "$lcmd" == *"{ printf"* && "$lcmd" == *"host "* && "$lcmd" == *"; cat "* ]]; then
+    printf '%s' "$cmd"
+    return 0
+  fi
+
+  # END{ … printf Host … ForwardAgent … } is the broken append form.
+  if [[ "$cmd" =~ 'END[[:space:]]*\{[^}]*[Hh]ost[[:space:]]+([A-Za-z0-9._*[:alnum:]-]+)' ]]; then
+    host="${match[1]}"
+  elif [[ "$cmd" == *'>>'* && "$cmd" =~ '[Hh]ost[[:space:]]+([A-Za-z0-9._*[:alnum:]-]+)' ]]; then
+    host="${match[1]}"
+  else
+    printf '%s' "$cmd"
+    return 0
+  fi
+
+  [[ -n "$host" && "$host" != '*' ]] || {
+    printf '%s' "$cmd"
+    return 0
+  }
+
+  if [[ "$cmd" =~ '[Ff]orward[Aa]gent[[:space:]]+(yes|no)' ]]; then
+    fa="${match[1]:l}"
+  fi
+
+  if [[ "$cmd" =~ "awk[[:space:]]+'[^']*'[[:space:]]+([^[:space:]|>]+)" ]]; then
+    cfg="${match[1]}"
+  elif [[ "$cmd" =~ 'awk[[:space:]]+"[^"]*"[[:space:]]+([^[:space:]|>]+)' ]]; then
+    cfg="${match[1]}"
+  elif [[ "$cmd" =~ '([^[:space:]|>]*ssh_config[^[:space:]|>]*)' ]]; then
+    cfg="${match[1]}"
+  elif [[ "$cmd" =~ '([^[:space:]|>]*\.ssh/config[^[:space:]|>]*)' ]]; then
+    cfg="${match[1]}"
+  else
+    printf '%s' "$cmd"
+    return 0
+  fi
+
+  # Refuse to rewrite when path/host would break single-quoted printf.
+  if [[ "$cfg" == *\'* || "$host" == *\'* || "$cfg" == *'|'* || "$cfg" == *';'* || "$cfg" == *'&'* ]]; then
+    printf '%s' "$cmd"
+    return 0
+  fi
+
+  printf "%s" "{ printf 'Host ${host}\\n    ForwardAgent ${fa}\\n\\n'; cat ${cfg}; } > ${cfg}.tmp && cat ${cfg}.tmp > ${cfg} && rm ${cfg}.tmp"
+  return 0
+}
+
+# Report a find expression that combines -prune with -delete.
+#
+# Args:
+#   cmd: Shell command text.
+#
+# Returns:
+#   0 when both -prune and -delete are present, 1 otherwise.
+#
+# -delete implies -depth, and -depth makes -prune a no-op, so the excluded
+# path is deleted. Callers must not execute the command.
 
 # Rewrite ssh-keygen answers that auto-confirm overwrite into a no-overwrite form.
 #
@@ -1097,7 +1244,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.13"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.15"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -1317,11 +1464,18 @@ _t2t_handle() {
 
   # Warn on the raw answer first (yes | ssh-keygen must stay dangerous), then
   # rewrite auto-yes ssh-keygen into a form that will not overwrite an existing key.
+  # ssh first-match: a Host-specific ForwardAgent block appended after
+  # Host * never takes effect. Rewrite to prepend + cat-over before display.
   local raw_command="$command"
   local rewritten
   rewritten=$(_t2t_rewrite_ssh_keygen_overwrite "$command")
   if [[ "$rewritten" != "$command" ]]; then
     print -u2 "[talk2term] Rewrote auto-yes ssh-keygen so an existing key is not overwritten."
+    command="$rewritten"
+  fi
+  rewritten=$(_t2t_rewrite_ssh_config_host_order "$command")
+  if [[ "$rewritten" != "$command" ]]; then
+    print -u2 "[talk2term] Rewrote ssh_config Host block to come before Host * (ssh first-match)."
     command="$rewritten"
   fi
 
