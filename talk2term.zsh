@@ -438,7 +438,8 @@ _t2t_build_file_sample() {
 # paths (keys). CSV and TSV contribute the header row. Other allowlisted
 # files contribute the first 12 lines, cut at 500 bytes. Private keys and
 # credential assignments, including pass and pwd names, are not sent.
-# Set T2T_NO_FILE_SAMPLES=1 to skip sampling. Each sent file is named on stderr.
+# Set T2T_NO_FILE_SAMPLES=1 to skip sampling. Each sent file is named on stderr
+# once per resolved path, even when the prompt names that file twice.
 #
 # Args:
 #   prompt: The user request, which may name local files.
@@ -454,7 +455,9 @@ _t2t_attach_file_samples() {
   local -a tokens
   tokens=("${(z)prompt}")
   # file_path, not path: zsh ties path to PATH, so a local named path hides every external command.
+  # seen_paths: the same file named twice in one prompt must not emit two notices.
   local token file_path resolved sample block="" count=0
+  local -A seen_paths
   for token in "${tokens[@]}"; do
     (( count >= 2 )) && break
     file_path=$(_t2t_sample_path_token "$token")
@@ -463,12 +466,14 @@ _t2t_attach_file_samples() {
     _t2t_sample_suffix_allowed "${file_path:t}" || continue
     _t2t_sample_name_blocked "${file_path:t}" && continue
     resolved="${file_path:A}"
+    [[ -n "${seen_paths[$resolved]}" ]] && continue
     _t2t_sample_home_blocked "$resolved" && continue
     _t2t_sample_name_blocked "${resolved:t}" && continue
     _t2t_file_sample_blocked "$resolved" && continue
     sample=$(_t2t_build_file_sample "$resolved")
     [[ -z "$sample" ]] && continue
     sample="${sample[1,800]}"
+    seen_paths[$resolved]=1
     block+="--- ${file_path} ---"$'\n'"${sample}"$'\n'
     print -u2 "[talk2term] sent structure of ${file_path} to the API"
     count=$((count + 1))
@@ -829,13 +834,25 @@ _t2t_is_t2t_buffer() {
   [[ "$b" == t2t || "$b" == t2t\ * || "$b" == t2t:* || "$b" == t2t-p || "$b" == t2t-p\ * || "$b" == t2t-p:* ]]
 }
 
-# One warning per session when t2t is invoked as a shell function.
+# One warning until acknowledged when t2t is invoked as a shell function.
 #
 # Interactive lines are read from the raw buffer, so < and > stay literal.
+# A marker file keeps the hint from repeating in every new shell (daily
+# harnesses and short-lived zsh -c calls). Override the path with
+# T2T_QUOTE_WARN_FILE. Delete that file to see the hint again.
 _t2t_warn_quoting() {
   [[ -n "$_T2T_QUOTE_WARNED" ]] && return
+  local marker="${T2T_QUOTE_WARN_FILE:-$HOME/.talk2term-quote-warned}"
+  if [[ -f "$marker" ]]; then
+    typeset -g _T2T_QUOTE_WARNED=1
+    return
+  fi
   typeset -g _T2T_QUOTE_WARNED=1
   print -u2 "[talk2term] Quote a prompt that contains < > & | * or ?. Example: t2t 'size < 10k'. An interactive t2t line is read before the shell parses those characters."
+  {
+    umask 077
+    : > "$marker"
+  } 2>/dev/null || true
 }
 
 # Copy text to clipboard — supports macOS, Linux (X11 + Wayland), WSL, MSYS2/Cygwin.
@@ -1244,7 +1261,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.15"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.16"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).

@@ -222,6 +222,34 @@ inv=$(_t2t_attach_file_samples "hosts in (inventory.json)" 2>/dev/null)
 notice=$(_t2t_attach_file_samples "show inventory.json" 2>&1 >/dev/null)
 [[ "$notice" == *"[talk2term] sent structure of inventory.json to the API"* ]] || fail "missing sample notice: $notice"
 
+# Same file named twice must emit one notice and one FILE STRUCTURE block.
+printf '%s\n' 'id-1' 'id-2' > ids.txt
+dup_notice=$(_t2t_attach_file_samples "extract from ids.txt unique from ids.txt" 2>&1 >/dev/null)
+notice_count=$(print -r -- "$dup_notice" | grep -c 'sent structure of ids.txt' || true)
+[[ "$notice_count" == 1 ]] || fail "duplicate sample notice: count=$notice_count body=$dup_notice"
+dup_sample=$(_t2t_attach_file_samples "extract from ids.txt unique from ids.txt" 2>/dev/null)
+block_count=$(print -r -- "$dup_sample" | grep -c '^--- ids.txt ---' || true)
+[[ "$block_count" == 1 ]] || fail "duplicate FILE STRUCTURE block: count=$block_count"
+
+# Quoting hint is once until the marker file exists (not every new shell).
+quote_root=$(mktemp -d "${TMPDIR:-/tmp}/t2t-quote.XXXXXX") || fail "mktemp quote root"
+quote_marker="$quote_root/quote-warned"
+rm -f "$quote_marker"
+first=$(T2T_QUOTE_WARN_FILE="$quote_marker" zsh -c '
+  emulate -L zsh
+  source "'"$plugin_dir"'/talk2term.zsh"
+  _t2t_warn_quoting
+' 2>&1)
+[[ "$first" == *Quote* ]] || fail "first quoting hint missing: $first"
+[[ -f "$quote_marker" ]] || fail "quote marker was not written"
+second=$(T2T_QUOTE_WARN_FILE="$quote_marker" zsh -c '
+  emulate -L zsh
+  source "'"$plugin_dir"'/talk2term.zsh"
+  _t2t_warn_quoting
+' 2>&1)
+[[ -z "$second" ]] || fail "quoting hint repeated after marker: $second"
+rm -rf "$quote_root"
+
 opt=$(T2T_NO_FILE_SAMPLES=1 _t2t_attach_file_samples "show inventory.json" 2>/dev/null)
 [[ "$opt" != *"FILE STRUCTURE"* ]] || fail "T2T_NO_FILE_SAMPLES=1 still sampled"
 
