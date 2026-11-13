@@ -17,12 +17,12 @@ The installer does not log you in and does not write your API key. It only print
 Review the script, check the checksum, then run it. Tag: `v1.2.17`.
 
 - Script: [install.sh at v1.2.17](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.17/install.sh)
-- sha256: `e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4`
+- sha256: `04299818f8a07b3fe600e169cb66c0f8c46babbb99970a3d7c2e297a419e619f`
 
 ```sh
 curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.17/install.sh
-echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | sha256sum -c -
+echo "04299818f8a07b3fe600e169cb66c0f8c46babbb99970a3d7c2e297a419e619f  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "04299818f8a07b3fe600e169cb66c0f8c46babbb99970a3d7c2e297a419e619f  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 source ~/.zshrc
 ```
