@@ -14,15 +14,15 @@ The installer does not log you in and does not write your API key. It only print
 
 ## Pinned install
 
-Review the script, check the checksum, then run it. Tag: `v1.2.15`.
+Review the script, check the checksum, then run it. Tag: `v1.2.16`.
 
-- Script: [install.sh at v1.2.15](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.15/install.sh)
-- sha256: `7e24dcf487a171d7695c5145b1d8eb41d7819b8fecfa156807651aba4b76d5f6`
+- Script: [install.sh at v1.2.16](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.16/install.sh)
+- sha256: `e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4`
 
 ```sh
-curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.15/install.sh
-echo "7e24dcf487a171d7695c5145b1d8eb41d7819b8fecfa156807651aba4b76d5f6  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "7e24dcf487a171d7695c5145b1d8eb41d7819b8fecfa156807651aba4b76d5f6  /tmp/talk2term-install.sh" | sha256sum -c -
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.16/install.sh
+echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 source ~/.zshrc
 ```
@@ -34,7 +34,7 @@ The installer finishes in a few seconds.
 No Oh My Zsh:
 
 ```sh
-git clone --depth 1 --branch v1.2.15 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.16 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
 source ~/.zshrc
 ```
@@ -52,7 +52,7 @@ echo 'YOUR_API_KEY' > ~/.talk2term && chmod 600 ~/.talk2term
 t2t list files
 ```
 
-A `t2t` request takes about 20 seconds. That wait is the API. Success looks like this. The translated command can differ. `ls` is typical for `list files`:
+A `t2t` request takes about 5 to 7 seconds. That wait is the API. Success looks like this. The translated command can differ. `ls` is typical for `list files`:
 
 ```text
 $ t2t list files
@@ -76,7 +76,7 @@ If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero:
 ## Oh My Zsh
 
 ```sh
-git clone --depth 1 --branch v1.2.15 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.16 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
 Add to `~/.zshrc`:
@@ -140,7 +140,7 @@ Then run: `sheldon lock --update`
 ## Manual (git clone)
 
 ```sh
-git clone --depth 1 --branch v1.2.15 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.16 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 ```
 
 Add to `~/.zshrc`:
@@ -163,7 +163,7 @@ Restart: `source ~/.zshrc`
 
 ## Updating
 
-Re-run the pinned installer for the tag you want. `t2t-update` checks out the tag baked into that plugin (`v1.2.15` in this release). It does not pull unpinned `main`.
+Re-run the pinned installer for the tag you want. `t2t-update` checks out the tag baked into that plugin (`v1.2.16` in this release). It does not pull unpinned `main`.
 
 ---
 
