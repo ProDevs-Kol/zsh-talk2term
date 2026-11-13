@@ -17,12 +17,12 @@ The installer does not log you in and does not write your API key. It only print
 Review the script, check the checksum, then run it. Tag: `v1.2.17`.
 
 - Script: [install.sh at v1.2.17](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.17/install.sh)
-- sha256: `e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4`
+- sha256: `1a6a2a4c5b4a2025bb307351feab83aeb9e0e40b46dd28f57546be53087ae6f5`
 
 ```sh
 curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.17/install.sh
-echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | sha256sum -c -
+echo "1a6a2a4c5b4a2025bb307351feab83aeb9e0e40b46dd28f57546be53087ae6f5  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "1a6a2a4c5b4a2025bb307351feab83aeb9e0e40b46dd28f57546be53087ae6f5  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 source ~/.zshrc
 ```
@@ -52,7 +52,7 @@ echo 'YOUR_API_KEY' > ~/.talk2term && chmod 600 ~/.talk2term
 t2t list files
 ```
 
-A `t2t` request takes about 5 to 7 seconds. That wait is the API. Success looks like this. The translated command can differ. `ls` is typical for `list files`:
+A `t2t` request takes about 20 seconds. That wait is the API. Success looks like this. The translated command can differ. `ls` is typical for `list files`:
 
 ```text
 $ t2t list files
