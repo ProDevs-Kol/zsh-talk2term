@@ -1142,6 +1142,24 @@ _t2t_rewrite_ssh_config_host_order() {
 # -delete implies -depth, and -depth makes -prune a no-op, so the excluded
 # path is deleted. Callers must not execute the command.
 
+# Brace `$name:` before a letter or `&` so zsh history modifiers cannot fire.
+#
+# Args:
+#   cmd: Shell command text from the API.
+#
+# Returns:
+#   Prints the rewritten command (or the original when nothing matches).
+#
+# Daily honest tests (12–13 Nov 2026): `offset=$target_offset:linear=true`
+# becomes `…-0.96inear=true` under zsh because `:l` lowercases. `${name}:`
+# is safe in both zsh and bash. Already-braced forms are left alone.
+_t2t_rewrite_zsh_colon_modifiers() {
+  emulate -L zsh
+  local cmd="$1"
+  # $name:X where X starts a history modifier letter or &. Skip ${name}.
+  printf '%s' "$cmd" | sed -E 's/\$([A-Za-z_][A-Za-z0-9_]*)(:[A-Za-z&])/\$\{\1\}\2/g'
+}
+
 # Rewrite ssh-keygen answers that auto-confirm overwrite into a no-overwrite form.
 #
 # Args:
@@ -1244,7 +1262,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.15"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.16"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -1478,6 +1496,11 @@ _t2t_handle() {
     print -u2 "[talk2term] Rewrote ssh_config Host block to come before Host * (ssh first-match)."
     command="$rewritten"
   fi
+  rewritten=$(_t2t_rewrite_zsh_colon_modifiers "$command")
+  if [[ "$rewritten" != "$command" ]]; then
+    print -u2 "[talk2term] Braced \$var: so zsh history modifiers cannot eat the next letter."
+    command="$rewritten"
+  fi
 
   # --- DISPLAY COMMAND ---
   # Use print without -P for API-controlled content to prevent ZSH prompt
@@ -1547,6 +1570,8 @@ _t2t_handle() {
 #   The exit status of the command.
 _t2t_run_returned_command() {
   local command="$1"
+  # Defense in depth: brace $name: even when callers skip the display rewrite.
+  command=$(_t2t_rewrite_zsh_colon_modifiers "$command")
   local use_subshell=0
   if _t2t_has_bare_exit "$command" || _t2t_has_top_level_assignment "$command"; then
     use_subshell=1
