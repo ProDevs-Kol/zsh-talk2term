@@ -516,6 +516,40 @@ _t2t_curl() {
   return $rc
 }
 
+# Map a binary name to the package that provides it.
+#
+# Debian/Ubuntu package names often differ from the binary (jpegtran,
+# exiftool, identify). Unknown names pass through unchanged.
+#
+# Args:
+#   bin: Command name that was not found.
+#
+# Returns:
+#   Package name for the current platform's package manager.
+_t2t_package_for_bin() {
+  local bin="$1"
+  case "$_T2T_PLATFORM" in
+    macos)
+      case "$bin" in
+        jpegtran|cjpeg|djpeg) print -r -- "libjpeg-turbo" ;;
+        exiftool) print -r -- "exiftool" ;;
+        identify|magick|convert|mogrify) print -r -- "imagemagick" ;;
+        ffprobe|ffmpeg) print -r -- "ffmpeg" ;;
+        *) print -r -- "$bin" ;;
+      esac
+      ;;
+    *)
+      case "$bin" in
+        jpegtran|cjpeg|djpeg) print -r -- "libjpeg-turbo-progs" ;;
+        exiftool) print -r -- "libimage-exiftool-perl" ;;
+        identify|magick|convert|mogrify) print -r -- "imagemagick" ;;
+        ffprobe) print -r -- "ffmpeg" ;;
+        *) print -r -- "$bin" ;;
+      esac
+      ;;
+  esac
+}
+
 # Package-manager install line for a missing binary.
 #
 # Args:
@@ -525,23 +559,25 @@ _t2t_curl() {
 #   A one-line install hint for the current platform.
 _t2t_install_hint() {
   local bin="$1"
+  local pkg
+  pkg=$(_t2t_package_for_bin "$bin")
   case "$_T2T_PLATFORM" in
     macos)
-      print -r -- "brew install ${bin}"
+      print -r -- "brew install ${pkg}"
       ;;
     linux)
       if (( $+commands[apt-get] )); then
-        print -r -- "sudo apt-get install ${bin}"
+        print -r -- "sudo apt-get install ${pkg}"
       elif (( $+commands[dnf] )); then
-        print -r -- "sudo dnf install ${bin}"
+        print -r -- "sudo dnf install ${pkg}"
       elif (( $+commands[pacman] )); then
-        print -r -- "sudo pacman -S ${bin}"
+        print -r -- "sudo pacman -S ${pkg}"
       else
-        print -r -- "sudo apt-get install ${bin}"
+        print -r -- "sudo apt-get install ${pkg}"
       fi
       ;;
     *)
-      print -r -- "your package manager (${bin})"
+      print -r -- "your package manager (${pkg})"
       ;;
   esac
 }
@@ -743,29 +779,75 @@ _t2t_is_refusal() {
   return 1
 }
 
-# Warn when the command's main binary is not installed.
+# Collect names defined as `name()` helpers in the command text.
+#
+# ${(z)} splits `g(){ … }` into `g`, `()`, `{`, … so the helper is not a
+# missing package. Call sites of the same name are also skipped.
+#
+# Args:
+#   words: Command tokens from ${(z)}.
+#
+# Returns:
+#   Prints one defined function name per line.
+_t2t_defined_function_names() {
+  local -a words
+  words=("$@")
+  local i=1
+  while (( i < ${#words} )); do
+    if [[ "${words[i+1]}" == '()' && "${words[i]}" == [[:alpha:]_]* ]]; then
+      print -r -- "${words[i]}"
+    fi
+    i=$((i + 1))
+  done
+}
+
+# Warn when binaries used in the command are not installed.
 #
 # Prints "needs X: install with …" and does not block execution.
-# Separators, globs, and cron fields are not package names.
+# Separators, globs, cron fields, and `name()` helpers are not packages.
+# Every pipeline / list position is checked (not only the first word).
 #
 # Args:
 #   cmd: Shell command text returned by the API.
 _t2t_warn_missing_tools() {
   local cmd="$1"
-  local -a words check seen
+  local -a words check seen defined
   words=("${(z)cmd}")
-  local bin="" i=1 w hint
+  defined=("${(@f)$(_t2t_defined_function_names "${words[@]}")}")
+  local bin="" i=1 w hint depth
+  local at_command=1
   while (( i <= ${#words} )); do
     w="${words[i]}"
+    if _t2t_is_shell_separator "$w"; then
+      at_command=1
+      i=$((i + 1))
+      continue
+    fi
     # for f in …; select x in …: the loop variable and list are not commands.
     if [[ "$w" == (for|select|foreach) ]]; then
       i=$((i + 1))
       while (( i <= ${#words} )) && [[ "${words[i]}" != (do|\;|\;\;|\{) ]]; do
         i=$((i + 1))
       done
+      at_command=1
       continue
     fi
-    if _t2t_is_shell_separator "$w"; then
+    # Skip `name() { … }` bodies; the name is a helper, not a package.
+    if (( i < ${#words} )) && [[ "${words[i+1]}" == '()' ]]; then
+      i=$((i + 2))
+      if (( i <= ${#words} )) && [[ "${words[i]}" == '{' ]]; then
+        depth=1
+        i=$((i + 1))
+        while (( i <= ${#words} && depth > 0 )); do
+          [[ "${words[i]}" == '{' ]] && depth=$((depth + 1))
+          [[ "${words[i]}" == '}' ]] && depth=$((depth - 1))
+          i=$((i + 1))
+        done
+      fi
+      at_command=1
+      continue
+    fi
+    if (( ! at_command )); then
       i=$((i + 1))
       continue
     fi
@@ -791,23 +873,19 @@ _t2t_warn_missing_tools() {
       i=$((i + 1))
       continue
     fi
-    bin="$w"
-    break
+    check+=("$w")
+    at_command=0
+    i=$((i + 1))
   done
-  [[ -n "$bin" ]] && check+=("$bin")
   if [[ "$cmd" == *"git filter-repo"* || "$cmd" == *"git-filter-repo"* ]]; then
     check+=("git-filter-repo")
   fi
-  for w in "${words[@]}"; do
-    case "$w" in
-      lsof|parallel|git-filter-repo) check+=("$w") ;;
-    esac
-  done
   for bin in "${check[@]}"; do
     [[ -z "$bin" || "$bin" == -* ]] && continue
     case "$bin" in
       if|then|else|elif|fi|for|while|until|do|done|case|esac|in|function|\{|\}|\(|\)) continue ;;
     esac
+    (( ${defined[(Ie)$bin]} )) && continue
     (( ${seen[(Ie)$bin]} )) && continue
     seen+=("$bin")
     if [[ "$bin" == /* || "$bin" == ./* ]]; then
@@ -916,19 +994,38 @@ _t2t_is_dangerous_command() {
   [[ "$lcmd" == *"/etc/passwd"* ]] && return 0
   [[ "$lcmd" == *"/etc/shadow"* ]] && return 0
 
-  # Pipe to interpreter (reverse shells, malicious downloads)
+  # Pipe to a login shell is always a risk (curl|bash installers).
   [[ "$lcmd" == *"| sh"* ]] && return 0
   [[ "$lcmd" == *"| bash"* ]] && return 0
   [[ "$lcmd" == *"| zsh"* ]] && return 0
   [[ "$lcmd" == *"|sh"* ]] && return 0
   [[ "$lcmd" == *"|bash"* ]] && return 0
   [[ "$lcmd" == *"|zsh"* ]] && return 0
-  [[ "$lcmd" == *"| python"* ]] && return 0
-  [[ "$lcmd" == *"| perl"* ]] && return 0
-  [[ "$lcmd" == *"| ruby"* ]] && return 0
+  # | perl / | python / | ruby are common for local text filters. Only warn
+  # when the left side is a downloader (curl|perl style payload runners).
+  if [[ "$lcmd" == *"| perl"* || "$lcmd" == *"|perl"* \
+     || "$lcmd" == *"| python"* || "$lcmd" == *"|python"* \
+     || "$lcmd" == *"| ruby"* || "$lcmd" == *"|ruby"* ]]; then
+    if [[ "$lcmd" =~ '(^|[^[:alnum:]_])(curl|wget)([^[:alnum:]_]|$)' ]]; then
+      return 0
+    fi
+  fi
   [[ "$lcmd" == *"base64"*"| sh"* ]] && return 0
   [[ "$lcmd" =~ 'nc[[:space:]].*-e[[:space:]]*/bin/' ]] && return 0
   [[ "$lcmd" =~ 'bash[[:space:]]+-i[[:space:]]+>&' ]] && return 0
+
+  # History rewrite (not continue/abort/skip of an in-progress rebase).
+  if [[ "$lcmd" =~ '(^|[^[:alnum:]_])git[[:space:]]+rebase([^[:alnum:]_]|$)' ]]; then
+    if [[ "$lcmd" != *"--continue"* && "$lcmd" != *"--abort"* && "$lcmd" != *"--skip"* ]]; then
+      return 0
+    fi
+  fi
+  # In-place exif strip / overwrite.
+  if [[ "$lcmd" == *"exiftool"* ]]; then
+    if [[ "$lcmd" == *"-overwrite_original"* || "$lcmd" == *"-all="* ]]; then
+      return 0
+    fi
+  fi
 
   # Fork bombs
   [[ "$lcmd" == *":(){:|:&};:"* ]] && return 0
