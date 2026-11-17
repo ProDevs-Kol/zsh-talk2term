@@ -451,7 +451,7 @@ unset -f curl
 [[ "$timeout_out" != *"Raw (truncated)"* ]] || fail "timeout stderr was treated as the body: $timeout_out"
 [[ "$timeout_out" != *"not JSON"* ]] || fail "timeout was parsed as a bad JSON body: $timeout_out"
 
-# Named-target warnings (PRO-8297 / daily tests 8, 9, 14, 17).
+# Named-target warnings (PRO-8297 / daily tests 8, 9, 14, 17, 19).
 expect_name_warn() {
   local prompt="$1"
   local command="$2"
@@ -477,6 +477,9 @@ test08_swapped="chmod 700 ~/.ssh && chmod 600 ~/.ssh/config ~/.ssh/authorized_ke
 test08_kept="chmod 700 sshdir && chmod 600 sshdir/config sshdir/authorized_keys && find sshdir -maxdepth 1 -type f ! -name '*.pub' -exec chmod 600 {} +"
 test08_additive='chmod 700 sshdir && chmod 600 sshdir/config sshdir/authorized_keys && chmod 700 ~/.ssh'
 test09_prompt='under the folder tree list every file name that exists in more than one directory, together with all the paths where it appears; names may contain spaces'
+test19_prompt='under names, list the files and folders whose own name contains any non-ASCII character, one path per line; names can contain spaces'
+test19_swapped="LC_ALL=C find . -mindepth 1 -name '*[^ -~]*' -print"
+test19_kept="LC_ALL=C find names -mindepth 1 -name '*[^ -~]*' -print"
 
 expect_name_warn "$test17_prompt" 'ffmpeg -ss 5 -i input.mp4 -t 7 -c copy clip.mp4' 'in.mp4'
 expect_name_silent "$test17_prompt" 'ffmpeg -ss 5 -i in.mp4 -t 7 -c copy clip.mp4'
@@ -495,5 +498,18 @@ expect_name_silent 'make a copy of reports and put it in ~/Downloads' 'cp -R rep
 expect_name_silent 'make a copy of reports and put it in Downloads' 'cp -R reports ~/Downloads'
 expect_name_warn "$test09_prompt" 'python3 -c '"'"'import os; [print(p) for p,_,fs in os.walk(".") for f in fs]'"'"'' 'tree'
 expect_name_silent "$test09_prompt" 'find tree -type f -print'
+expect_name_warn "$test19_prompt" "$test19_swapped" 'names'
+expect_name_silent "$test19_prompt" "$test19_kept"
+expect_name_silent 'print the directory name for each path' 'dirname /etc/hosts'
+
+names_cwd=$(mktemp -d)
+(
+  cd "$names_cwd" || exit 1
+  mkdir names
+  warn=$(_t2t_named_target_warning "$test19_prompt" "$test19_swapped")
+  [[ "$warn" == *names* ]] || fail "test 19 cwd warn missing names: $warn"
+  [[ "$warn" == *"is in this directory"* ]] || fail "test 19 cwd warn missing local note: $warn"
+)
+rm -rf "$names_cwd"
 
 print "ok: destructive warning, prune/delete refusal, file sample, shell safety, and named-target warnings"

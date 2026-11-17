@@ -1381,7 +1381,7 @@ _t2t_file_tokens() {
   fi
 }
 
-# Return 0 when a word is an article, quantifier, or other non-name.
+# Return 0 when a word is never a target name.
 #
 # Args:
 #   word: One word from the user request.
@@ -1389,7 +1389,25 @@ _t2t_is_target_exclusion() {
   emulate -L zsh
   local w="${1:l}"
   case "$w" in
-    the|a|an|this|that|my|your|and|or|but|nor|one|ones|each|every|any|all|some|both|other|another|many|few|more|most|several|same|such|own|its|his|her|their|our|these|those|which|what|whose|file|files|folder|folders|directory|directories|dir|dirs|path|paths|name|names)
+    the|a|an|this|that|my|your|and|or|but|nor|one|ones|each|every|any|all|some|both|other|another|many|few|more|most|several|same|such|own|its|his|her|their|our|these|those|which|what|whose|file|files|folder|folders|directory|directories|dir|dirs|path|paths)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# Return 0 when a folder-cue token is the word name/names (not a real folder).
+#
+# Keep silent for "folder name" / "directory name". Do not use this after
+# under/of/called/named so a folder literally called names still warns.
+#
+# Args:
+#   word: One word from the user request.
+_t2t_is_folder_cue_name_exclusion() {
+  emulate -L zsh
+  local w="${1:l}"
+  case "$w" in
+    name|names)
       return 0
       ;;
   esac
@@ -1399,7 +1417,9 @@ _t2t_is_target_exclusion() {
 # Print folder and file names that the request named as targets.
 #
 # A token counts only when it sits next to folder/directory/dir, follows
-# of/called/named, or contains a dot. Ordinary words are not scanned.
+# under/of/called/named, or contains a dot. name/names after a folder cue are
+# skipped; the same words after under/of/called/named count (test 19).
+# Ordinary words are not scanned.
 #
 # Args:
 #   prompt: User request, without the t2t: prefix.
@@ -1417,7 +1437,9 @@ _t2t_prompt_target_names() {
   rest="$prompt"
   while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._-]*[[:space:]]+(folders?|directories|directory|dirs?)' ]]; do
     word="${MATCH%%[[:space:]]*}"
-    if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
+    if [[ -n "$word" && -z "${seen[$word]}" ]] \
+      && ! _t2t_is_target_exclusion "$word" \
+      && ! _t2t_is_folder_cue_name_exclusion "$word"; then
       seen[$word]=1
       tokens+=("$word")
     fi
@@ -1427,7 +1449,9 @@ _t2t_prompt_target_names() {
   rest="$prompt"
   while [[ -n "$rest" && "$rest" =~ '(folders?|directories|directory|dirs?)[[:space:]]+[[:alnum:]][[:alnum:]._-]*' ]]; do
     word="${MATCH##*[[:space:]]}"
-    if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
+    if [[ -n "$word" && -z "${seen[$word]}" ]] \
+      && ! _t2t_is_target_exclusion "$word" \
+      && ! _t2t_is_folder_cue_name_exclusion "$word"; then
       seen[$word]=1
       tokens+=("$word")
     fi
@@ -1435,7 +1459,7 @@ _t2t_prompt_target_names() {
   done
 
   rest="$prompt"
-  while [[ -n "$rest" && "$rest" =~ '(of|called|named)[[:space:]]+[[:alnum:]][[:alnum:]._-]*' ]]; do
+  while [[ -n "$rest" && "$rest" =~ '(under|of|called|named)[[:space:]]+[[:alnum:]][[:alnum:]._-]*' ]]; do
     word="${MATCH##*[[:space:]]}"
     if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
       seen[$word]=1
@@ -1459,7 +1483,6 @@ _t2t_prompt_target_names() {
     print -r -- "${(F)tokens}"
   fi
 }
-
 # Return 0 when the command uses a name as its own path token.
 #
 # "ssh" inside ~/.ssh is not a use of the name ssh. Regex metacharacters in
