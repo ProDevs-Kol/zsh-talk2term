@@ -1533,6 +1533,17 @@ _t2t_handle() {
     return 0
   fi
 
+  # Parse-check before offering Execute (PRO-8533). Truncated / broken
+  # replies must not reach eval, even if the API skipped a compile gate.
+  if ! zsh -nc -- "$command" 2>/dev/null; then
+    print -u2 "[talk2term] Command failed a zsh parse check; not offering Execute."
+    if print -rn -- "$command" | _t2t_clipboard_copy 2>/dev/null; then
+      print -u2 "[talk2term] Broken command copied to clipboard for inspection."
+    fi
+    _t2t_maybe_reset_prompt
+    return 0
+  fi
+
   print -Pn "Execute? (y/n): "
   read -k 1 reply
   print

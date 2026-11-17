@@ -26,13 +26,13 @@ It instantly returns the equivalent shell command and asks for your confirmation
 
 ### Pinned installer (recommended)
 
-Review the script, check the checksum, then run it. Tag: `v1.2.16`.
+Review the script, check the checksum, then run it. Tag: `v1.2.17`.
 
-- Script: [install.sh at v1.2.16](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.16/install.sh)
+- Script: [install.sh at v1.2.17](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.17/install.sh)
 - sha256: `e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4`
 
 ```sh
-curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.16/install.sh
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.17/install.sh
 echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
 # Linux: echo "e35c049e322e112bba0bdb7e2bf922b844d3efa5afa747bf9557ea2a446884a4  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
@@ -69,13 +69,13 @@ If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 1. **Clone the plugin**
 
 ```bash
-git clone --depth 1 --branch v1.2.16 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.17 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
 No Oh My Zsh:
 
 ```bash
-git clone --depth 1 --branch v1.2.16 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.17 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
 ```
 
