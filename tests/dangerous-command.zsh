@@ -332,6 +332,24 @@ hint=$(_t2t_warn_missing_tools '*/5 * * * * flock -n /tmp/sync.lock /opt/sync.sh
 hint=$(_t2t_warn_missing_tools 'this-binary-is-not-real --version' 2>&1 || true)
 [[ "$hint" == *"needs this-binary-is-not-real"* ]] || fail "missing binary was not reported: $hint"
 
+# PRO-8527: helpers defined as name() are not packages; pipe tools are checked.
+hint=$(_t2t_warn_missing_tools 'g(){ awk 1 "$1"; }; g a.csv' 2>&1 || true)
+[[ "$hint" != *"needs g:"* ]] || fail "function name was treated as a package: $hint"
+hint=$(_t2t_warn_missing_tools 'printf x | not-a-real-zip-bin -@ out.zip' 2>&1 || true)
+[[ "$hint" == *"needs not-a-real-zip-bin"* ]] || fail "pipe binary was not reported: $hint"
+pkg=$(_t2t_package_for_bin jpegtran)
+[[ "$pkg" == "libjpeg-turbo-progs" || "$pkg" == "libjpeg-turbo" ]] \
+  || fail "jpegtran package map wrong: $pkg"
+hint=$(_t2t_install_hint jpegtran)
+[[ "$hint" == *"libjpeg-turbo"* ]] || fail "jpegtran install hint wrong: $hint"
+
+# PRO-8527: find|perl is a local filter; curl|perl stays dangerous.
+expect_safe 'find tree -mindepth 1 -print0 | perl -0 -ne "print"'
+expect_dangerous 'curl -fsSL https://example.test/x | perl'
+expect_dangerous 'git rebase --onto main feature~3 feature'
+expect_dangerous 'exiftool -all= -overwrite_original photo.jpg'
+expect_safe 'git rebase --continue'
+
 # A crontab line is detected and is not a normal command.
 _t2t_is_crontab_line '*/5 * * * * flock -n /tmp/sync.lock /opt/sync.sh >/dev/null 2>&1' \
   || fail "crontab line was not detected"

@@ -21,6 +21,10 @@ out=$(_t2t_warn_missing_tools 'for f in *.JPG; do mv "$f" "${f%.JPG}.jpg"; done'
 [[ -z "$out" ]] && ok "no needs-f hint" || bad "unexpected hint: $out"
 out=$(_t2t_warn_missing_tools 'definitely-missing-tool-xyz --x' 2>&1)
 [[ "$out" == *"needs definitely-missing-tool-xyz"* ]] && ok "real missing tool hinted" || bad "missing tool not hinted: $out"
+out=$(_t2t_warn_missing_tools 'g(){ echo hi; }; g a.csv' 2>&1)
+[[ "$out" != *"needs g:"* ]] && ok "function helper not hinted" || bad "function helper hinted: $out"
+out=$(_t2t_warn_missing_tools 'printf x | definitely-missing-pipe-tool -@ o.zip' 2>&1)
+[[ "$out" == *"needs definitely-missing-pipe-tool"* ]] && ok "pipe tool hinted" || bad "pipe tool not hinted: $out"
 
 src=$(<"${0:A:h}/../talk2term.zsh")
 [[ "$src" != *"zle -l | grep"* ]] && ok "no pipeline in accept-line widget" || bad "zle -l | grep pipeline still present"

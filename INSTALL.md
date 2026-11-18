@@ -52,7 +52,7 @@ echo 'YOUR_API_KEY' > ~/.talk2term && chmod 600 ~/.talk2term
 t2t list files
 ```
 
-A `t2t` request takes about 5 to 7 seconds. That wait is the API. Success looks like this. The translated command can differ. `ls` is typical for `list files`:
+A `t2t` request takes about 20 seconds. That wait is the API. Success looks like this. The translated command can differ. `ls` is typical for `list files`:
 
 ```text
 $ t2t list files

@@ -56,9 +56,7 @@ To use this plugin, you need an API key from [Talk2Term](https://talk2term.prode
    t2t list files
    ```
 
-The installer finishes in a few seconds. A `t2t` request takes about 5 to 7 seconds. That wait is the API. Success prints a translated command and `Execute? (y/n):`. The command text can differ. `ls` is typical for `t2t list files`. Answer `n` to cancel. Nothing runs until you answer `y`.
-
-When you answer `y`, a top-level `VAR=value` (and bare `exit`) runs in a subshell so it cannot change your interactive shell. That means `d=/tmp; cd $d` also does not stick — use an inlined path such as `cd /tmp`, or `export`, when the change must last. Pure `cd` / `export` without a top-level assignment still run in the current shell.
+The installer finishes in a few seconds. A `t2t` request takes about 20 seconds. That wait is the API. Success prints a translated command and `Execute? (y/n):`. The command text can differ. `ls` is typical for `t2t list files`. Answer `n` to cancel. Nothing runs until you answer `y`.
 
 If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero.
 
