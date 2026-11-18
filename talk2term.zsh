@@ -1436,6 +1436,9 @@ _t2t_handle() {
       print -u2 "  Get more credits at: https://talk2term.prodevs.in"
     elif [[ "$err_safe" == *"deprecated"* ]]; then
       print -u2 "[talk2term] This feature is no longer available. Please update the plugin."
+    elif [[ "$err_safe" == *"Empty response"* || "$err_safe" == *"convert budget"* || "$err_safe" == *"not charged"* || "$err_safe" == *"No answer came back"* ]]; then
+      # PRO-8533 / 18 Nov: plain wording for uncharged empty/timeout failures
+      print -u2 "[talk2term] No answer came back. You were not charged. Try again."
     else
       print -u2 "[talk2term] API error: $err_safe"
     fi
