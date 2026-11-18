@@ -1436,6 +1436,9 @@ _t2t_handle() {
       print -u2 "  Get more credits at: https://talk2term.prodevs.in"
     elif [[ "$err_safe" == *"deprecated"* ]]; then
       print -u2 "[talk2term] This feature is no longer available. Please update the plugin."
+    elif [[ "$err_safe" == *"Empty response"* || "$err_safe" == *"convert budget"* || "$err_safe" == *"not charged"* || "$err_safe" == *"No answer came back"* ]]; then
+      # PRO-8533 / 18 Nov: plain wording for uncharged empty/timeout failures
+      print -u2 "[talk2term] No answer came back. You were not charged. Try again."
     else
       print -u2 "[talk2term] API error: $err_safe"
     fi
@@ -1528,6 +1531,17 @@ _t2t_handle() {
       print "[talk2term] Copied. Install it with crontab -e."
     else
       print "[talk2term] Not run. Install it with crontab -e."
+    fi
+    _t2t_maybe_reset_prompt
+    return 0
+  fi
+
+  # Parse-check before offering Execute (PRO-8533). Truncated / broken
+  # replies must not reach eval, even if the API skipped a compile gate.
+  if ! zsh -nc -- "$command" 2>/dev/null; then
+    print -u2 "[talk2term] Command failed a zsh parse check; not offering Execute."
+    if print -rn -- "$command" | _t2t_clipboard_copy 2>/dev/null; then
+      print -u2 "[talk2term] Broken command copied to clipboard for inspection."
     fi
     _t2t_maybe_reset_prompt
     return 0
