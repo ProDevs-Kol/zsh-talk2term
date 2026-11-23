@@ -801,17 +801,83 @@ _t2t_defined_function_names() {
   done
 }
 
+# Remove heredoc bodies so missing-tool checks ignore payload text.
+#
+# Keeps the opener line (the real command) and drops every line from the
+# body through the terminator WORD. Handles <<WORD, <<'WORD', <<"WORD",
+# <<-WORD, and the quoted <<- forms. Here-strings (<<<) are left alone.
+#
+# Args:
+#   cmd: Shell command text returned by the API.
+#
+# Prints the command with heredoc bodies removed.
+_t2t_strip_heredoc_bodies() {
+  emulate -L zsh
+  local cmd="$1"
+  local -a lines out
+  local i=1 n line rest safe delim
+  local strip_tabs=0
+  lines=("${(@f)cmd}")
+  n=${#lines}
+  while (( i <= n )); do
+    line="${lines[i]}"
+    delim=""
+    strip_tabs=0
+    # <<< is a here-string, not a heredoc. Mask it before looking for <<.
+    safe="${line//<<</$'\x01\x01\x01'}"
+    if [[ "$safe" == *'<<'* ]]; then
+      rest="${safe#*<<}"
+      if [[ "$rest" == '-'* ]]; then
+        strip_tabs=1
+        rest="${rest#-}"
+      fi
+      rest="${rest##[[:space:]]#}"
+      if [[ "$rest" == \'[[:alnum:]_]##\'* ]]; then
+        delim="${${rest#\'}%%\'*}"
+      elif [[ "$rest" == \"[[:alnum:]_]##\"* ]]; then
+        delim="${${rest#\"}%%\"*}"
+      elif [[ "$rest" == \\[[:alnum:]_]##* ]]; then
+        delim="${rest#\\}"
+        delim="${delim%%[[:space:]\;\&\|\<\>]*}"
+      elif [[ "$rest" == [[:alnum:]_]##* ]]; then
+        delim="${rest%%[[:space:]\;\&\|\<\>]*}"
+      fi
+    fi
+    if [[ -n "$delim" ]]; then
+      out+=("$line")
+      i=$((i + 1))
+      while (( i <= n )); do
+        line="${lines[i]}"
+        if (( strip_tabs )); then
+          [[ "${line##$'\t'#}" == "$delim" ]] && break
+        else
+          [[ "$line" == "$delim" ]] && break
+        fi
+        i=$((i + 1))
+      done
+      # Drop the terminator line when present.
+      (( i <= n )) && i=$((i + 1))
+      continue
+    fi
+    out+=("$line")
+    i=$((i + 1))
+  done
+  (( ${#out} )) && print -r -- "${(j.\n.)out}"
+}
+
 # Warn when binaries used in the command are not installed.
 #
 # Prints "needs X: install with …" and does not block execution.
-# Separators, globs, cron fields, and `name()` helpers are not packages.
-# Every pipeline / list position is checked (not only the first word).
+# Separators, globs, cron fields, heredoc bodies, and `name()` helpers
+# are not packages. Every pipeline / list position is checked (not only
+# the first word).
 #
 # Args:
 #   cmd: Shell command text returned by the API.
 _t2t_warn_missing_tools() {
   local cmd="$1"
   local -a words check seen defined
+  cmd=$(_t2t_strip_heredoc_bodies "$cmd")
   words=("${(z)cmd}")
   defined=("${(@f)$(_t2t_defined_function_names "${words[@]}")}")
   local bin="" i=1 w hint depth
@@ -995,12 +1061,9 @@ _t2t_is_dangerous_command() {
   [[ "$lcmd" == *"/etc/shadow"* ]] && return 0
 
   # Pipe to a login shell is always a risk (curl|bash installers).
-  [[ "$lcmd" == *"| sh"* ]] && return 0
-  [[ "$lcmd" == *"| bash"* ]] && return 0
-  [[ "$lcmd" == *"| zsh"* ]] && return 0
-  [[ "$lcmd" == *"|sh"* ]] && return 0
-  [[ "$lcmd" == *"|bash"* ]] && return 0
-  [[ "$lcmd" == *"|zsh"* ]] && return 0
+  # Match sh/bash/zsh as a whole word so | sha256sum / | shasum / | shuf
+  # do not false-alarm (substring "| sh" matched those names).
+  [[ "$lcmd" =~ '\|[[:space:]]*(/bin/|/usr/bin/)?(sh|bash|zsh)([^[:alnum:]_]|$)' ]] && return 0
   # | perl / | python / | ruby are common for local text filters. Only warn
   # when the left side is a downloader (curl|perl style payload runners).
   if [[ "$lcmd" == *"| perl"* || "$lcmd" == *"|perl"* \
@@ -1010,7 +1073,6 @@ _t2t_is_dangerous_command() {
       return 0
     fi
   fi
-  [[ "$lcmd" == *"base64"*"| sh"* ]] && return 0
   [[ "$lcmd" =~ 'nc[[:space:]].*-e[[:space:]]*/bin/' ]] && return 0
   [[ "$lcmd" =~ 'bash[[:space:]]+-i[[:space:]]+>&' ]] && return 0
 
@@ -1376,7 +1438,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.17"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.18"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).

