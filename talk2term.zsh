@@ -1483,10 +1483,35 @@ _t2t_prompt_target_names() {
     print -r -- "${(F)tokens}"
   fi
 }
+# Print a command with /etc and /var/www paths removed.
+#
+# Daily test 04 (23 Nov 2026): app.service inside
+# /etc/systemd/system/app.service must not count as using the named cwd file.
+# Relative app.service stays visible after the scrub.
+#
+# Args:
+#   command: Shell command.
+#
+# Output:
+#   The same command with those system paths replaced by a space.
+_t2t_scrub_system_paths() {
+  emulate -L zsh
+  local command="$1"
+  local out="" rest="$command"
+  local MATCH MBEGIN MEND
+  while [[ -n "$rest" && "$rest" =~ '(/etc|/var/www)(/[[:alnum:]._-]+)*' ]]; do
+    out+="${rest[1,MBEGIN-1]} "
+    rest="${rest[MEND+1,-1]}"
+  done
+  out+="$rest"
+  print -r -- "$out"
+}
+
 # Return 0 when the command uses a name as its own path token.
 #
-# "ssh" inside ~/.ssh is not a use of the name ssh. Regex metacharacters in
-# the token are escaped before the match.
+# "ssh" inside ~/.ssh is not a use of the name ssh. A match that is only the
+# trailing segment of an /etc or /var/www path also does not count. Regex
+# metacharacters in the token are escaped before the match.
 #
 # Args:
 #   command: Shell command.
@@ -1495,15 +1520,20 @@ _t2t_command_has_token() {
   emulate -L zsh
   local command="$1"
   local token="$2"
-  local escaped
+  local escaped scrubbed
   # Path tokens are alphanumeric with . _ - . Escape dots so they are
   # literal in the regex, matching commandHasToken on the server.
   [[ "$token" == *[!A-Za-z0-9._-]* ]] && return 1
   escaped="${token//./\\.}"
-  [[ "$command" =~ "(^|[^[:alnum:]_.-])${escaped}([^[:alnum:]_.-]|$)" ]]
+  scrubbed=$(_t2t_scrub_system_paths "$command")
+  [[ "$scrubbed" =~ "(^|[^[:alnum:]_.-])${escaped}([^[:alnum:]_.-]|$)" ]]
 }
 
 # Return 0 when the request already names this well-known path.
+#
+# Final-segment naming (Downloads → ~/Downloads) does not apply to /etc or
+# /var/www, so a bare app.service in the prompt does not name
+# /etc/systemd/system/app.service.
 #
 # Args:
 #   prompt: User request with $HOME normalized to ~.
@@ -1512,6 +1542,7 @@ _t2t_prompt_names_well_known_path() {
   emulate -L zsh
   local prompt="$1"
   local path="$2"
+  local full="$path"
   local parent segment bare
 
   parent="$path"
@@ -1522,7 +1553,13 @@ _t2t_prompt_names_well_known_path() {
   done
   [[ "$prompt" == *"$path"* ]] && return 0
 
-  segment="${path##*/}"
+  case "$full" in
+    (/etc|/etc/*|/var/www|/var/www/*)
+      return 1
+      ;;
+  esac
+
+  segment="${full##*/}"
   bare="${segment#.}"
   if (( ${#bare} > 3 )) && _t2t_command_has_token "$prompt" "$bare"; then
     return 0

@@ -451,7 +451,7 @@ unset -f curl
 [[ "$timeout_out" != *"Raw (truncated)"* ]] || fail "timeout stderr was treated as the body: $timeout_out"
 [[ "$timeout_out" != *"not JSON"* ]] || fail "timeout was parsed as a bad JSON body: $timeout_out"
 
-# Named-target warnings (PRO-8297 / daily tests 8, 9, 14, 17, 19).
+# Named-target warnings (PRO-8297 / daily tests 8, 9, 14, 17, 19, 04).
 expect_name_warn() {
   local prompt="$1"
   local command="$2"
@@ -480,6 +480,9 @@ test09_prompt='under the folder tree list every file name that exists in more th
 test19_prompt='under names, list the files and folders whose own name contains any non-ASCII character, one path per line; names can contain spaces'
 test19_swapped="LC_ALL=C find . -mindepth 1 -name '*[^ -~]*' -print"
 test19_kept="LC_ALL=C find names -mindepth 1 -name '*[^ -~]*' -print"
+test04_prompt='print the ExecStart commands of app.service that are in effect after the .conf files in app.service.d are applied in file name order; an empty ExecStart= line discards all earlier ExecStart commands'
+test04_swapped='if [ -f /etc/systemd/system/app.service ]; then cat -- /etc/systemd/system/app.service; fi; ls -1 /etc/systemd/system/app.service.d/*.conf'
+test04_kept='if [ -f app.service ]; then cat -- app.service; fi; ls -1 app.service.d/*.conf'
 
 expect_name_warn "$test17_prompt" 'ffmpeg -ss 5 -i input.mp4 -t 7 -c copy clip.mp4' 'in.mp4'
 expect_name_silent "$test17_prompt" 'ffmpeg -ss 5 -i in.mp4 -t 7 -c copy clip.mp4'
@@ -500,6 +503,9 @@ expect_name_warn "$test09_prompt" 'python3 -c '"'"'import os; [print(p) for p,_,
 expect_name_silent "$test09_prompt" 'find tree -type f -print'
 expect_name_warn "$test19_prompt" "$test19_swapped" 'names'
 expect_name_silent "$test19_prompt" "$test19_kept"
+expect_name_warn "$test04_prompt" "$test04_swapped" 'app.service'
+expect_name_warn "$test04_prompt" "$test04_swapped" '/etc'
+expect_name_silent "$test04_prompt" "$test04_kept"
 expect_name_silent 'print the directory name for each path' 'dirname /etc/hosts'
 
 names_cwd=$(mktemp -d)
@@ -511,5 +517,17 @@ names_cwd=$(mktemp -d)
   [[ "$warn" == *"is in this directory"* ]] || fail "test 19 cwd warn missing local note: $warn"
 )
 rm -rf "$names_cwd"
+
+units_cwd=$(mktemp -d)
+(
+  cd "$units_cwd" || exit 1
+  : > app.service
+  mkdir app.service.d
+  warn=$(_t2t_named_target_warning "$test04_prompt" "$test04_swapped")
+  [[ "$warn" == *app.service* ]] || fail "test 04 cwd warn missing app.service: $warn"
+  [[ "$warn" == *"/etc"* ]] || fail "test 04 cwd warn missing /etc: $warn"
+  [[ "$warn" == *"is in this directory"* ]] || fail "test 04 cwd warn missing local note: $warn"
+)
+rm -rf "$units_cwd"
 
 print "ok: destructive warning, prune/delete refusal, file sample, shell safety, and named-target warnings"
