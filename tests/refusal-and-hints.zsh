@@ -26,6 +26,24 @@ out=$(_t2t_warn_missing_tools 'g(){ echo hi; }; g a.csv' 2>&1)
 out=$(_t2t_warn_missing_tools 'printf x | definitely-missing-pipe-tool -@ o.zip' 2>&1)
 [[ "$out" == *"needs definitely-missing-pipe-tool"* ]] && ok "pipe tool hinted" || bad "pipe tool not hinted: $out"
 
+# PRO-8557: heredoc body lines are not package names.
+heredoc_cmd=$(cat <<'EOF'
+python3 - <<'PY'
+from collections import defaultdict, deque
+order = []
+print("ok")
+PY
+EOF
+)
+out=$(_t2t_warn_missing_tools "$heredoc_cmd" 2>&1)
+[[ "$out" != *"needs from:"* ]] && ok "heredoc import not hinted" || bad "heredoc import hinted: $out"
+[[ "$out" != *"needs order:"* ]] && ok "heredoc assign not hinted" || bad "heredoc assign hinted: $out"
+[[ "$out" != *"needs PY:"* ]] && ok "heredoc terminator not hinted" || bad "heredoc terminator hinted: $out"
+[[ "$out" != *"needs print:"* ]] && ok "heredoc print not hinted" || bad "heredoc print hinted: $out"
+# Opener still checked when the binary is missing.
+out=$(_t2t_warn_missing_tools $'definitely-missing-heredoc-bin - <<\'H\'\nbody\nH' 2>&1)
+[[ "$out" == *"needs definitely-missing-heredoc-bin"* ]] && ok "heredoc opener hinted" || bad "heredoc opener not hinted: $out"
+
 src=$(<"${0:A:h}/../talk2term.zsh")
 [[ "$src" != *"zle -l | grep"* ]] && ok "no pipeline in accept-line widget" || bad "zle -l | grep pipeline still present"
 long="I can't help with deleting everything. Instead, remove only temp/cache files you have reviewed, for example old build artifacts in your project folder."
