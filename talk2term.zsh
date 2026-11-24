@@ -812,7 +812,11 @@ _t2t_defined_function_names() {
 #
 # Prints the command with heredoc bodies removed.
 _t2t_strip_heredoc_bodies() {
+  # EXTENDED_GLOB is required for ## / # in the delimiter patterns below.
+  # emulate -L zsh leaves it off, so without LOCAL_OPTIONS the body is kept
+  # and Python/awk lines are tokenised as missing packages (PRO-8573).
   emulate -L zsh
+  setopt LOCAL_OPTIONS EXTENDED_GLOB
   local cmd="$1"
   local -a lines out
   local i=1 n line rest safe delim
@@ -862,7 +866,7 @@ _t2t_strip_heredoc_bodies() {
     out+=("$line")
     i=$((i + 1))
   done
-  (( ${#out} )) && print -r -- "${(j.\n.)out}"
+  (( ${#out} )) && print -r -- "${(F)out}"
 }
 
 # Warn when binaries used in the command are not installed.
@@ -1425,10 +1429,19 @@ _t2t_file_tokens() {
   local text="$1"
   local -a tokens
   local -A seen
-  local token rest="$text"
+  local token rest="$text" before
   local MATCH MBEGIN MEND
-  while [[ -n "$rest" && "$rest" =~ '[[:alnum:]][[:alnum:]._/-]*\.[[:alpha:]][[:alnum:]]{0,7}' ]]; do
+  # Optional leading / so /etc/.../app.service keeps its slash (PRO-8573).
+  while [[ -n "$rest" && "$rest" =~ '/?[[:alnum:]][[:alnum:]._/-]*\.[[:alpha:]][[:alnum:]]{0,7}' ]]; do
     token="$MATCH"
+    # Avoid treating the trailing segment of a longer path as a second hit
+    # when the match did not include a slash but sits after one.
+    if [[ "$token" != /* ]]; then
+      before="${rest[1,MBEGIN-1]}"
+      if [[ "$before" == */ ]]; then
+        token="/$token"
+      fi
+    fi
     if [[ -z "$token" || -n "${seen[$token]}" ]]; then
       rest="${rest[MEND+1,-1]}"
       [[ -z "$token" ]] && break
@@ -1458,21 +1471,43 @@ _t2t_is_target_exclusion() {
   return 1
 }
 
-# Return 0 when a folder-cue token is the word name/names (not a real folder).
+# Return 0 when a folder-cue token is the generic phrase "folder name(s)".
 #
-# Keep silent for "folder name" / "directory name". Do not use this after
-# under/of/called/named so a folder literally called names still warns.
+# Keep silent for "folder name" / "directory names" (token AFTER the cue).
+# Do not exclude "names folder" (token BEFORE the cue) — a folder literally
+# called names must still warn when the command uses "." (PRO-8573 test 10).
+# Do not use this after under/of/called/named.
 #
 # Args:
 #   word: One word from the user request.
+#   position: "before" when NAME precedes the cue, "after" when it follows.
 _t2t_is_folder_cue_name_exclusion() {
   emulate -L zsh
   local w="${1:l}"
+  local position="${2:-after}"
+  # "names folder" / "names directory" names a real folder.
+  [[ "$position" == before ]] && return 1
   case "$w" in
     name|names)
       return 0
       ;;
   esac
+  return 1
+}
+
+# Return 0 when a pre-cue token is an English hyphenated adjective.
+#
+# "drop-in directory worker.service.d" must not treat drop-in as a folder
+# name (PRO-8573 daily test 01). Tokens with a dot still count as paths.
+#
+# Args:
+#   word: Token taken from before folders?/directory/dirs?.
+_t2t_is_hyphenated_folder_adjective() {
+  emulate -L zsh
+  local w="$1"
+  [[ "$w" == *[!A-Za-z0-9._-]* ]] && return 1
+  [[ "$w" == *.* ]] && return 1
+  [[ "$w" == *-* ]] && return 0
   return 1
 }
 
@@ -1501,7 +1536,8 @@ _t2t_prompt_target_names() {
     word="${MATCH%%[[:space:]]*}"
     if [[ -n "$word" && -z "${seen[$word]}" ]] \
       && ! _t2t_is_target_exclusion "$word" \
-      && ! _t2t_is_folder_cue_name_exclusion "$word"; then
+      && ! _t2t_is_folder_cue_name_exclusion "$word" before \
+      && ! _t2t_is_hyphenated_folder_adjective "$word"; then
       seen[$word]=1
       tokens+=("$word")
     fi
@@ -1513,7 +1549,7 @@ _t2t_prompt_target_names() {
     word="${MATCH##*[[:space:]]}"
     if [[ -n "$word" && -z "${seen[$word]}" ]] \
       && ! _t2t_is_target_exclusion "$word" \
-      && ! _t2t_is_folder_cue_name_exclusion "$word"; then
+      && ! _t2t_is_folder_cue_name_exclusion "$word" after; then
       seen[$word]=1
       tokens+=("$word")
     fi
@@ -1726,6 +1762,26 @@ _t2t_named_target_warning() {
     [[ -n "${prompt_set[$name]}" ]] || invented+=("$name")
   done
 
+  local -a targets missing_names invented_paths missing_here
+  raw=$(_t2t_prompt_target_names "$prompt")
+  if [[ -n "$raw" ]]; then
+    targets=("${(f)raw}")
+    for name in "${targets[@]}"; do
+      _t2t_command_has_token "$command" "$name" || missing_names+=("$name")
+    done
+  fi
+
+  raw=$(_t2t_invented_well_known_paths "$prompt" "$command")
+  if [[ -n "$raw" ]]; then
+    invented_paths=("${(f)raw}")
+  fi
+
+  # Prefer well-known /etc paths over file-token hits that lost their slash.
+  # One clear warning beats three overlapping sentences (PRO-8573 test 04).
+  if (( ${#invented_paths} )); then
+    invented=("${invented_paths[@]}")
+  fi
+
   if (( ${#dropped} && ${#invented} )); then
     for name in "${dropped[@]}"; do
       [[ -e "$name" ]] && dropped_here+=("$name")
@@ -1735,35 +1791,27 @@ _t2t_named_target_warning() {
     done
     if (( ${#dropped_here} && ${#invented_missing} )); then
       warnings+=("${(j:, :)dropped_here} is in this directory, but the command uses ${(j:, :)invented_missing}, which is not here.")
+    elif (( ${#missing_names} && ${#invented_paths} )); then
+      warnings+=("The command does not use ${(j:, :)missing_names} from the request. The command uses ${(j:, :)invented_paths}, which the request did not name.")
     else
       warnings+=("The command does not use ${(j:, :)dropped} from the request. It uses ${(j:, :)invented} instead.")
     fi
-  fi
-
-  local -a targets missing_names invented_paths missing_here
-  raw=$(_t2t_prompt_target_names "$prompt")
-  if [[ -n "$raw" ]]; then
-    targets=("${(f)raw}")
-    for name in "${targets[@]}"; do
-      _t2t_command_has_token "$command" "$name" || missing_names+=("$name")
-    done
-  fi
-  if (( ${#missing_names} )); then
+  elif (( ${#missing_names} )); then
     for name in "${missing_names[@]}"; do
       [[ -e "$name" ]] && missing_here+=("$name")
     done
     if (( ${#missing_here} )); then
-      warnings+=("${(j:, :)missing_here} is in this directory, but the command does not use it.")
+      if (( ${#invented_paths} )); then
+        warnings+=("${(j:, :)missing_here} is in this directory, but the command uses ${(j:, :)invented_paths}, which is not here.")
+      else
+        warnings+=("${(j:, :)missing_here} is in this directory, but the command does not use it.")
+      fi
+    elif (( ${#invented_paths} )); then
+      warnings+=("The command does not use ${(j:, :)missing_names} from the request. The command uses ${(j:, :)invented_paths}, which the request did not name.")
     else
       warnings+=("The command does not use ${(j:, :)missing_names} from the request.")
     fi
-  fi
-
-  raw=$(_t2t_invented_well_known_paths "$prompt" "$command")
-  if [[ -n "$raw" ]]; then
-    invented_paths=("${(f)raw}")
-  fi
-  if (( ${#invented_paths} && ${#targets} )); then
+  elif (( ${#invented_paths} && ${#targets} )); then
     warnings+=("The command uses ${(j:, :)invented_paths}, which the request did not name.")
   fi
 
@@ -1797,7 +1845,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.18"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.20"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).

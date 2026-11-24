@@ -40,6 +40,12 @@ out=$(_t2t_warn_missing_tools "$heredoc_cmd" 2>&1)
 [[ "$out" != *"needs order:"* ]] && ok "heredoc assign not hinted" || bad "heredoc assign hinted: $out"
 [[ "$out" != *"needs PY:"* ]] && ok "heredoc terminator not hinted" || bad "heredoc terminator hinted: $out"
 [[ "$out" != *"needs print:"* ]] && ok "heredoc print not hinted" || bad "heredoc print hinted: $out"
+# PRO-8573: strip must run with EXTENDED_GLOB or `def key(v):` leaks `core,`.
+core_cmd=$'python3 - <<\'PY\'\ndef key(v):\n    v = v.strip()\n    core, _, pre = v.partition("-")\nPY'
+stripped=$(_t2t_strip_heredoc_bodies "$core_cmd")
+[[ "$stripped" == "python3 - <<'PY'" ]] && ok "heredoc body stripped" || bad "heredoc body not stripped: $stripped"
+out=$(_t2t_warn_missing_tools "$core_cmd" 2>&1)
+[[ -z "$out" ]] && ok "heredoc core, not hinted" || bad "heredoc core, hinted: $out"
 # Opener still checked when the binary is missing.
 out=$(_t2t_warn_missing_tools $'definitely-missing-heredoc-bin - <<\'H\'\nbody\nH' 2>&1)
 [[ "$out" == *"needs definitely-missing-heredoc-bin"* ]] && ok "heredoc opener hinted" || bad "heredoc opener not hinted: $out"
