@@ -520,6 +520,21 @@ expect_name_warn "$test04_prompt" "$test04_swapped" '/etc'
 expect_name_silent "$test04_prompt" "$test04_kept"
 expect_name_silent 'print the directory name for each path' 'dirname /etc/hosts'
 
+# PRO-8573: one warning, leading slash kept, no repeated "does not use".
+warn=$(_t2t_named_target_warning "$test04_prompt" "$test04_swapped")
+[[ "$warn" == *"/etc/systemd/system/app.service"* ]] || fail "test 04 warn missing slashed /etc path: $warn"
+rest="${warn#*does not use}"
+[[ "$rest" != *"does not use"* ]] || fail "test 04 warn repeated does-not-use: $warn"
+
+# PRO-8573: drop-in is English, not a folder name.
+dropin_prompt='print the ExecStart of worker.service after the drop-in directory worker.service.d is applied'
+dropin_kept='if [ -f worker.service ]; then cat -- worker.service; fi; ls -1 worker.service.d/*.conf'
+expect_name_silent "$dropin_prompt" "$dropin_kept"
+
+# PRO-8573: "names folder" must warn when the command uses ".".
+expect_name_warn 'in the names folder, list every entry' "python3 -c 'import os; print(os.listdir(\".\"))'" 'names'
+expect_name_silent 'list the folder names under tree' 'find tree -type d'
+
 names_cwd=$(mktemp -d)
 (
   cd "$names_cwd" || exit 1
@@ -539,6 +554,8 @@ units_cwd=$(mktemp -d)
   [[ "$warn" == *app.service* ]] || fail "test 04 cwd warn missing app.service: $warn"
   [[ "$warn" == *"/etc"* ]] || fail "test 04 cwd warn missing /etc: $warn"
   [[ "$warn" == *"is in this directory"* ]] || fail "test 04 cwd warn missing local note: $warn"
+  rest="${warn#*does not use}"
+  [[ "$rest" != *"does not use"* ]] || fail "test 04 cwd warn repeated does-not-use: $warn"
 )
 rm -rf "$units_cwd"
 
