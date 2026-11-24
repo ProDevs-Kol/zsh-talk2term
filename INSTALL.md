@@ -14,15 +14,15 @@ The installer does not log you in and does not write your API key. It only print
 
 ## Pinned install
 
-Review the script, check the checksum, then run it. Tag: `v1.2.19`.
+Review the script, check the checksum, then run it. Tag: `v1.2.20`.
 
-- Script: [install.sh at v1.2.19](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.19/install.sh)
-- sha256: `c22c0ba0c20432158eece7718fb2009fd308bfe8a9476ff590e5a1dfe266f9a2`
+- Script: [install.sh at v1.2.20](https://github.com/ProDevs-Kol/zsh-talk2term/blob/v1.2.20/install.sh)
+- sha256: `7882d04456ad04f3aad0f118c27067a6493122f1a3e461291283a8cea9fdc1f9`
 
 ```sh
-curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.19/install.sh
-echo "c22c0ba0c20432158eece7718fb2009fd308bfe8a9476ff590e5a1dfe266f9a2  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
-# Linux: echo "c22c0ba0c20432158eece7718fb2009fd308bfe8a9476ff590e5a1dfe266f9a2  /tmp/talk2term-install.sh" | sha256sum -c -
+curl -fsSL -o /tmp/talk2term-install.sh https://raw.githubusercontent.com/prodevs-kol/zsh-talk2term/v1.2.20/install.sh
+echo "7882d04456ad04f3aad0f118c27067a6493122f1a3e461291283a8cea9fdc1f9  /tmp/talk2term-install.sh" | shasum -a 256 -c -   # macOS
+# Linux: echo "7882d04456ad04f3aad0f118c27067a6493122f1a3e461291283a8cea9fdc1f9  /tmp/talk2term-install.sh" | sha256sum -c -
 sh /tmp/talk2term-install.sh
 source ~/.zshrc
 ```
@@ -34,7 +34,7 @@ The installer finishes in a few seconds.
 No Oh My Zsh:
 
 ```sh
-git clone --depth 1 --branch v1.2.19 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.20 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 printf '\n# Talk2Term ZSH Plugin\nsource "%s/talk2term.plugin.zsh"\n' "$HOME/.zsh/talk2term" >> ~/.zshrc
 source ~/.zshrc
 ```
@@ -76,7 +76,7 @@ If `~/.talk2term` is missing, `t2t` prints an error and exits non-zero:
 ## Oh My Zsh
 
 ```sh
-git clone --depth 1 --branch v1.2.19 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
+git clone --depth 1 --branch v1.2.20 https://github.com/prodevs-kol/zsh-talk2term.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/talk2term
 ```
 
 Add to `~/.zshrc`:
@@ -140,7 +140,7 @@ Then run: `sheldon lock --update`
 ## Manual (git clone)
 
 ```sh
-git clone --depth 1 --branch v1.2.19 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
+git clone --depth 1 --branch v1.2.20 https://github.com/prodevs-kol/zsh-talk2term.git ~/.zsh/talk2term
 ```
 
 Add to `~/.zshrc`:
@@ -163,7 +163,7 @@ Restart: `source ~/.zshrc`
 
 ## Updating
 
-Re-run the pinned installer for the tag you want. `t2t-update` checks out the tag baked into that plugin (`v1.2.19` in this release). It does not pull unpinned `main`.
+Re-run the pinned installer for the tag you want. `t2t-update` checks out the tag baked into that plugin (`v1.2.20` in this release). It does not pull unpinned `main`.
 
 ---
 
