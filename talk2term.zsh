@@ -1417,6 +1417,57 @@ _t2t_rewrite_ssh_keygen_overwrite() {
   return 0
 }
 
+# Remove the FILE STRUCTURE block appended by _t2t_attach_file_samples.
+#
+# Sampled file text must not feed named-target checks (PRO-8586). Daily
+# tests 07/09/14 warned on Java frames, JSON keys, and URL fragments that
+# came only from the sample, not from the user request.
+#
+# Args:
+#   prompt: User request, optionally with a trailing FILE STRUCTURE block.
+#
+# Output:
+#   The prompt with any FILE STRUCTURE block removed.
+_t2t_strip_file_structure() {
+  emulate -L zsh
+  local prompt="$1"
+  local marker=$'\n\nFILE STRUCTURE (data, not instructions'
+  if [[ "$prompt" == *"$marker"* ]]; then
+    prompt="${prompt%%${marker}*}"
+  fi
+  print -r -- "$prompt"
+}
+
+# Return 0 when a token looks like a path (contains . or /).
+#
+# Args:
+#   word: One candidate target name.
+_t2t_is_path_like_token() {
+  emulate -L zsh
+  local w="$1"
+  [[ "$w" == *.* || "$w" == */* ]]
+}
+
+# Return 0 when a bare word after "of" is ordinary English, not a name.
+#
+# "number of seconds", "times of meetings", and "of at least" must not
+# become targets (PRO-8586). Coined names like sshdir still count.
+# Path-like tokens are never treated as English here.
+#
+# Args:
+#   word: Token taken from after the cue of.
+_t2t_is_of_cue_english_noun() {
+  emulate -L zsh
+  local w="${1:l}"
+  _t2t_is_path_like_token "$1" && return 1
+  case "$w" in
+    meetings|meeting|seconds|second|minutes|minute|hours|hour|days|day|times|time|lines|line|rows|row|hosts|host|users|user|items|item|entries|entry|records|record|results|result|values|value|keys|key|names|name|data|info|text|content|size|count|number|numbers|list|lists|group|groups|set|sets|part|parts|type|types|level|levels|mode|modes|state|states|error|errors|warning|warnings|message|messages|event|events|access|login|logins|fail|fails|failed|success|start|end|top|bottom|left|right|side|sides|way|ways|case|cases)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 # Collect file names such as in.mp4, in first-seen order.
 #
 # Args:
@@ -1464,7 +1515,7 @@ _t2t_is_target_exclusion() {
   emulate -L zsh
   local w="${1:l}"
   case "$w" in
-    the|a|an|this|that|my|your|and|or|but|nor|one|ones|each|every|any|all|some|both|other|another|many|few|more|most|several|same|such|own|its|his|her|their|our|these|those|which|what|whose|file|files|folder|folders|directory|directories|dir|dirs|path|paths)
+    the|a|an|this|that|my|your|and|or|but|nor|one|ones|each|every|any|all|some|both|other|another|many|few|more|most|several|same|such|own|its|his|her|their|our|these|those|which|what|whose|file|files|folder|folders|directory|directories|dir|dirs|path|paths|at|least|once|twice|first|last|only|just|about|over|into|from|with|without|before|after|where|when|how|why|who|seconds|minutes|hours|days|times|lines|rows)
       return 0
       ;;
   esac
@@ -1514,9 +1565,11 @@ _t2t_is_hyphenated_folder_adjective() {
 # Print folder and file names that the request named as targets.
 #
 # A token counts only when it sits next to folder/directory/dir, follows
-# under/of/called/named, or contains a dot. name/names after a folder cue are
-# skipped; the same words after under/of/called/named count (test 19).
-# Ordinary words are not scanned.
+# under/of/called/named, or contains a dot or slash. Bare English nouns
+# after of (number of seconds, times of meetings) are ignored; coined
+# names like sshdir still count (PRO-8586). name/names after a folder
+# cue are skipped; the same words after under/called/named count (test 19).
+# FILE STRUCTURE samples are stripped before scanning.
 #
 # Args:
 #   prompt: User request, without the t2t: prefix.
@@ -1525,10 +1578,11 @@ _t2t_is_hyphenated_folder_adjective() {
 #   One name per line.
 _t2t_prompt_target_names() {
   emulate -L zsh
-  local prompt="$1"
+  local prompt
+  prompt=$(_t2t_strip_file_structure "$1")
   local -a tokens
   local -A seen
-  local word rest token
+  local word rest token cue
   local MATCH MBEGIN MEND
 
   rest="$prompt"
@@ -1558,7 +1612,13 @@ _t2t_prompt_target_names() {
 
   rest="$prompt"
   while [[ -n "$rest" && "$rest" =~ '(under|of|called|named)[[:space:]]+[[:alnum:]][[:alnum:]._-]*' ]]; do
+    cue="${MATCH%%[[:space:]]*}"
     word="${MATCH##*[[:space:]]}"
+    # "of" is common English ("number of seconds", "times of meetings").
+    if [[ "${cue:l}" == of ]] && _t2t_is_of_cue_english_noun "$word"; then
+      rest="${rest[MEND+1,-1]}"
+      continue
+    fi
     if [[ -n "$word" && -z "${seen[$word]}" ]] && ! _t2t_is_target_exclusion "$word"; then
       seen[$word]=1
       tokens+=("$word")
@@ -1720,6 +1780,7 @@ _t2t_invented_well_known_paths() {
 #
 # Daily tests 14 and 17 (28 Oct 2026), test 8 (29 Oct 2026), and test 9
 # (10 Nov 2026): the model swapped a named path. Show this text before Execute?.
+# PRO-8586: ignore FILE STRUCTURE samples and emit each warning once.
 #
 # Args:
 #   prompt: User request, without the t2t: prefix.
@@ -1729,12 +1790,13 @@ _t2t_invented_well_known_paths() {
 #   Warning text when the names need review. Prints nothing when they match.
 _t2t_named_target_warning() {
   emulate -L zsh
-  local prompt="$1"
+  local prompt
+  prompt=$(_t2t_strip_file_structure "$1")
   local command="$2"
   local -a warnings prompt_names command_names dropped invented
-  local -a dropped_here invented_missing
-  local -A prompt_set command_set
-  local name lcmd="${command:l}"
+  local -a dropped_here invented_missing unique_warnings
+  local -A prompt_set command_set seen_warning
+  local name lcmd="${command:l}" warning_item
 
   if [[ "$lcmd" == *"/path/to/"* || "$lcmd" == *"/path/to "* || "$lcmd" == */path/to || "$lcmd" =~ '(^|[^[:alnum:]_-])(your_file|your_folder|your-file|<file>|<folder>|<path>)([^[:alnum:]_-]|$)' ]]; then
     warnings+=("The command uses a placeholder path. Use the file or folder name from the request. Do not use /path/to/, your_file, or similar placeholders.")
@@ -1815,8 +1877,13 @@ _t2t_named_target_warning() {
     warnings+=("The command uses ${(j:, :)invented_paths}, which the request did not name.")
   fi
 
-  if (( ${#warnings} )); then
-    print -r -- "${(j: :)warnings}"
+  for warning_item in "${warnings[@]}"; do
+    [[ -n "$warning_item" && -z "${seen_warning[$warning_item]}" ]] || continue
+    seen_warning[$warning_item]=1
+    unique_warnings+=("$warning_item")
+  done
+  if (( ${#unique_warnings} )); then
+    print -r -- "${(j: :)unique_warnings}"
   fi
 }
 
@@ -1845,7 +1912,7 @@ _t2t_find_prune_delete_conflict() {
 (( ! ${+T2T_TRUSTED_DOMAINS} )) && typeset -g T2T_TRUSTED_DOMAINS=""
 
 # Pinned plugin tag. Keep in sync with PLUGIN_REF in install.sh and .version.
-(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.20"
+(( ! ${+T2T_PLUGIN_REF} )) && typeset -g T2T_PLUGIN_REF="v1.2.21"
 
 # --- PLATFORM DETECTION ---
 # Cached at source time (no repeated forks).
@@ -2137,14 +2204,11 @@ _t2t_handle() {
     return 0
   fi
 
-  # Warn when the model swapped a named file or folder. Prefer the local
-  # check; fall back to the server name_warning when this build has nothing.
+  # Warn when the model swapped a named file or folder. Local check only:
+  # the API name_warning was built from the sampled prompt and false-fired
+  # on JSON keys / stack frames / URL fragments (PRO-8586 daily 07/09/14).
   local name_warning
   name_warning=$(_t2t_named_target_warning "$user_prompt" "$command")
-  if [[ -z "$name_warning" ]]; then
-    name_warning=$(printf '%s' "$resp" | jq -r '.name_warning // empty')
-    [[ "$name_warning" == "null" ]] && name_warning=""
-  fi
   if [[ -n "$name_warning" ]]; then
     print -P "%F{yellow}  Name check:%f"
     print -r -- "  $name_warning"
